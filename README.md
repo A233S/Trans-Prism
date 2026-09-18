@@ -44,6 +44,15 @@
 ### 💊 药物存量仪表盘 & 智能调度提醒
 追踪 HRT 药物库存与安全续航天数。**Chronos 智能调度引擎**支持小时/天/周/月四种给药周期——从口服（12h）、外用凝胶到针剂（7天）、GnRHa（28天/84天）全覆盖。基于绝对时间戳的 OS 级通知，点击"已服药"自动扣减库存、推算下次给药时间并重设系统闹钟。
 
+### 💰 用药成本 & 记录导出
+补货时可选填**自定义规格 + 价格**（如 `30 元 / 28mg`、`1000 元 / 1针`，也支持按单价录入），据此推算**平均单次使用费用**。价格**可填可不填**——留空只加库存、**不计入统计**（不是按 0 元算），已填价格的药物按**加权平均**计算。
+
+口径说明：App 内的剂量与库存是**无单位的纯数字**，因此成本锚定在**「够用次数」**上：`单次使用费用（平均）= Σ本次花费 / Σ够用次数`。按次数加权让**总额天然自洽**，所以**打卡流程不需要任何额外输入**。遇到陌生单位（如「针」）可在补货时就地记一次换算（`1 针 = 5 mg`），之后自动折算。
+
+展示位置：药物卡片的「单次花费 ｜ 月」、仪表盘汇总卡的月预计与库存估值、首页存量摘要的月花费、以及独立的**用药成本明细页**（含累计支出趋势）。币种默认 `CNY`，可在「我的 → 成本币种」更换（**仅更换符号，不做汇率换算**）。
+
+**导出记录 PNG**：药物存量仪表盘右上角进入，支持 **仅记录 / 仅价格 / 价格+记录** 三种模式，每种都可选择**是否打码**（打码后药名显示为「药物 A/B/C」，并隐藏剂量、注射部位与备注，**保留金额**）。导出图为本地生成，含 App logo 与名称；记录较多时**自动分成多张图片**。
+
 ### 📈 药代动力学 (PK) 模拟器
 基于开源项目 [Oyama-s-HRT-Recorder](https://github.com/SmirnovaOyama/Oyama-s-HRT-Tracker) 的一室/多室指数衰减算法与多剂量叠加模型。支持模拟常见 HRT 药物的稳态血药浓度曲线。App 内嵌 WebView 运行，算法在 WebView 内的 JS 中（非 Dart 侧）。
 
@@ -87,6 +96,16 @@
 
 > 📋 此问题已列为待修复项，技术分析与修复方案详见 [`TODO.md`](TODO.md) 与 [`docs/DATA_EXPORT_COMPATIBILITY.md`](docs/DATA_EXPORT_COMPATIBILITY.md)。
 
+### 💰 用药成本的口径前提
+
+「用药成本」不是逐次精确记账，而是**按平均单价估算**。三条前提需要知道：
+
+1. **锚点是「够用次数」，不是任何度量单位**。App 内的「每次剂量 / 当前库存」都是**无单位的纯数字**，所以成本统计不依赖 mg/片/针：`单次使用费用（平均）= Σ本次花费 ÷ Σ够用次数`。按次数加权让**总额天然自洽**（先 `¥30/14次` 再 `¥40/14次` → 均价 `¥2.50/次`，28 次 × 2.50 = **¥70 = 真实总支出**），因此**打卡流程不需要任何额外输入**。
+2. **补货时的规格换算需你自己确认一次**。若买的是「针 / 片」而剂量按 mg 记，补货面板会就地问一次 `1 针 = 5 mg`（可勾选记住）；也可点 ⚡ 按剂量折算或直接手改「这份够用几次」。**程序不会替你猜**，但会把推导过程实时显示出来，错值当场可见。
+3. **币种只换符号，不做汇率换算**（默认 `CNY`，可在「我的 → 成本币种」更换）。切换币种**不会**改动已记录的历史数字。
+
+> 另外：**未设价格的药物不计入任何合计**（不是按 0 元算），汇总处会显式标注「不含未设价格的 N 种」。`0 元`（赠药）是**合法价格**，与「未填」严格区分。
+
 ---
 
 ## 🚀 快速使用
@@ -117,12 +136,15 @@ flutter build macos     # macOS（需自行签名）
 ## 🏗️ 架构速览
 
 ```
-Trans_Prism (Flutter App) ←── Cloudflare R2 ──→ Trans-Prism-Builder (内容工厂)
+Trans_Prism (Flutter App) ←── Cloudflare R2 ──→ Builder 内容工厂（VitePress）
      │                                               │
-     │ 10 大功能模块                                   │ Python 工具链清洗 5 个上游
-     │ 纯本地存储 (SharedPreferences)                  │ 编译 MkDocs Material 静态站点
-     │ 三路 OTA: APK/Wiki/Tracker                      │ 封包 ZIP → GitHub Release → R2
+     │ 11 大功能模块                                  │ 清洗 4 个 Wiki 上游 + 2 个 Tracker
+     │ 纯本地存储 (SharedPreferences)                 │ vitepress build → 打包期做离线相对化
+     │ 三路 OTA: APK / Wiki / Tracker                 │ 封包 ZIP → GitHub Release → R2
+     │  Wiki / Tracker 走 `vp-builder/` 通道          │  (旧 MkDocs 链保留在 `builder/` 前缀)
 ```
+
+> 知识库构建链已于 v1.6.5 从 **MkDocs Material** 迁移到 **VitePress**（`vp-builder/` 通道，套用 [`@project-trans/vitepress-theme-project-trans`](https://github.com/project-trans/vitepress-theme-project-trans)）；两条链在 R2 上路径隔离，可随时回退。详见 [ADR-004](ARCHITECTURE_DECISIONS.md)。
 
 详细架构决策参见 [`ARCHITECTURE_DECISIONS.md`](ARCHITECTURE_DECISIONS.md)，生态全貌参见 [`SYSTEM_MAP.md`](SYSTEM_MAP.md)。
 
@@ -141,6 +163,7 @@ Trans_Prism (Flutter App) ←── Cloudflare R2 ──→ Trans-Prism-Builder 
 | 音频 | `record` + `pitch_detector_dart`（YIN 算法） |
 | 通知 | `flutter_local_notifications` + `timezone` |
 | 更新分发 | Cloudflare R2 边缘节点 `downloads.chengxi.moe` |
+| 离线内容 | Builder 产出 **VitePress** 站点 ZIP（R2 `vp-builder/` 通道），App 侧 `shelf` 本地服务器与 `file://` 双兼容加载 |
 | 本地服务器 | `shelf`（PK 模拟器内嵌 HttpServer） |
 | 主题 | 双风格（简约风 + 毛玻璃）+ `liquid_glass_easy` 渲染包 + Impeller；`GlassTheme`（InheritedWidget）+ `GlassTokens` |
 
@@ -165,6 +188,7 @@ Trans_Prism (Flutter App) ←── Cloudflare R2 ──→ Trans-Prism-Builder 
 |----------|-------------|
 | 改首次启动向导 | [`onboarding_wizard.dart`](lib/screens/onboarding/onboarding_wizard.dart:38) / [`main.dart`](lib/main.dart:704)（`AppRootController` 三态判定 + 迁移分支）|
 | 改用药/提醒 | [`medication_service.dart`](lib/services/medication_service.dart:25) / [`notification_service.dart`](lib/services/notification_service.dart:14) |
+| 改用药成本 / 价格 | [`medication_cost_service.dart`](lib/services/medication_cost_service.dart:130)（**纯函数**：加权均价、够用次数折算）/ [`restock_sheet.dart`](lib/widgets/restock_sheet.dart:31)（补货录入口）/ [`inventory_dashboard_screen.dart`](lib/screens/inventory_dashboard_screen.dart:672)（药物表单 `_DrugFormPage`，含首次购入价格）/ [`medication_report_view.dart`](lib/widgets/medication_report_view.dart:44) + [`medication_report_renderer.dart`](lib/services/medication_report_renderer.dart:44)（导出长图与分片）|
 | 改 PK 模拟 | [`tracker_screen.dart`](lib/screens/tracker_screen.dart:189)（⚠️ 算法在 WebView JS 中，非 Dart）|
 | 改嗓音训练 | [`pitch_detection_service.dart`](lib/services/pitch_detection_service.dart:16) / `screens/voice_training/` |
 | 改 Wiki 知识库 | [`wiki_sync_service.dart`](lib/services/wiki_sync_service.dart:37) / [`wiki_update_manager.dart`](lib/services/wiki_update_manager.dart:31) |

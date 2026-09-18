@@ -154,7 +154,8 @@ class WikiOfflineService {
         return extractDir;
       }
 
-      // 3. 找包含 assets/ 目录的层级（这是 MkDocs 站点根目录的可靠标志）
+      // 3. 找包含 assets/ 目录的层级（站点根目录的可靠标志：VitePress 的
+      //    `dist/` 同样把哈希化 JS/CSS 输出到 `assets/`，与旧 MkDocs 链一致）
       //    用广度遍历逐层搜索，优先找最浅的 assets/
       String? siteRoot;
       int bestDepth = 99999;
