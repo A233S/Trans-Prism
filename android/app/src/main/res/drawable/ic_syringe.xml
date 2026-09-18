@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  针筒小图标 —— 路径 1:1 转自定稿预览 outputs/widget_preview.html 的内联 SVG
+  （viewBox 0 0 24 24，stroke-width 1.6，圆头圆角）。
+
+  实际渲染时由 Glance `ColorFilter.tint(MedsTokens.muted)` 着色，
+  故此处 strokeColor 仅为占位（会被 tint 覆盖），无需 drawable-night 副本。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <!-- 推杆尾 -->
+    <path
+        android:pathData="M18,2 L22,6"
+        android:strokeColor="#FF8A8580"
+        android:strokeWidth="1.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <!-- 推杆横档 -->
+    <path
+        android:pathData="M17,7 L20,4"
+        android:strokeColor="#FF8A8580"
+        android:strokeWidth="1.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <!-- 筒身 + 针头 -->
+    <path
+        android:pathData="M19,9 L8.7,19.3 A2.5,2.5 0 0 1 5.3,19.3 L4.7,18.7 A2.5,2.5 0 0 1 4.7,15.3 L15,5"
+        android:strokeColor="#FF8A8580"
+        android:strokeWidth="1.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <!-- 刻度 -->
+    <path
+        android:pathData="M9,11 L13,15"
+        android:strokeColor="#FF8A8580"
+        android:strokeWidth="1.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+</vector>

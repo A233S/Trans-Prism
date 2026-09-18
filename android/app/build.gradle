@@ -1,6 +1,10 @@
 plugins {
-    // 不再需要显式 apply "kotlin-android" 插件；启用 builtInKotlin 后由 Flutter Gradle Plugin 自动管理
     id "com.android.application"
+    // 桌面用药小组件（Glance）需要 @Composable 编译能力，故显式声明 Kotlin 插件
+    // 与 Compose Compiler 插件（版本统一由 settings.gradle 的 pluginManagement 管理）。
+    // 注意顺序：Compose 编译器必须晚于 Kotlin 插件、早于 Flutter 插件应用。
+    id "org.jetbrains.kotlin.android"
+    id "org.jetbrains.kotlin.plugin.compose"
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id "dev.flutter.flutter-gradle-plugin"
 }
@@ -48,6 +52,12 @@ android {
         jvmTarget = '11'
     }
 
+    // 桌面用药小组件（Glance）基于 Jetpack Compose Runtime，需开启 Compose 编译。
+    // 仅影响原生 widget 模块，不介入 Flutter 渲染管线。
+    buildFeatures {
+        compose = true
+    }
+
     signingConfigs {
         release {
             keyAlias = keystoreProperties['keyAlias']
@@ -59,7 +69,9 @@ android {
 
     defaultConfig {
         applicationId "com.daanser.transprism"
-        minSdkVersion = flutter.minSdkVersion
+        // Glance 1.2.0 要求 minSdk >= 23；取与 Flutter 模板默认值的较大者，
+        // 既不满足不了 Glance，也不会把既有下限调低。
+        minSdkVersion = Math.max(flutter.minSdkVersion, 23)
         targetSdk = 36
         versionCode = flutterVersionCode.toInteger()
         versionName = flutterVersionName
@@ -86,6 +98,10 @@ flutter {
 dependencies {
     // flutter_local_notifications 需要 core library desugaring
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+
+    // 桌面用药小组件（Glance for AppWidgets）。
+    // 数据仍读 Flutter 侧同一份 SharedPreferences，不引入第二套存储。
+    implementation("androidx.glance:glance-appwidget:1.2.0")
 }
 
 // ─── 自愈钩子：清理 macOS Finder 复制产生的 "xxx 2.ext" 违规资源副本 ───

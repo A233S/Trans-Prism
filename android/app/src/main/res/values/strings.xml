@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 桌面用药小组件（Trans Prism） -->
+    <string name="meds_widget_medium_label">今日用药</string>
+    <string name="meds_widget_medium_description">今日用药清单与近 7 天打卡</string>
+    <string name="meds_widget_small_label">待服用</string>
+    <string name="meds_widget_small_description">最近一条待服用与一键打卡</string>
+</resources>

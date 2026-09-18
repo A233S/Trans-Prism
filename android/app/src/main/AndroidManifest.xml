@@ -91,6 +91,34 @@
         <receiver
             android:name="com.dexterous.flutterlocalnotifications.ActionBroadcastReceiver"
             android:exported="false" />
+
+        <!-- ─── 桌面用药小组件（Glance for AppWidgets）───────────────────
+             AppWidget Provider 必须 exported=true，否则 Launcher 无法投递
+             APPWIDGET_UPDATE 广播，桌面也就无法添加该小组件。
+             数据侧只读 Flutter 的同一份 SharedPreferences
+             （drug_inventory_list / medication_logs），不新增任何存储。 -->
+        <receiver
+            android:name=".widget.MediumMedsWidgetReceiver"
+            android:exported="true"
+            android:label="@string/meds_widget_medium_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/meds_widget_medium_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.SmallMedsWidgetReceiver"
+            android:exported="true"
+            android:label="@string/meds_widget_small_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/meds_widget_small_info" />
+        </receiver>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

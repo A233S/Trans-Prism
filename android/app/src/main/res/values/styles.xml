@@ -15,4 +15,22 @@
     <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
         <item name="android:windowBackground">?android:colorBackground</item>
     </style>
+
+    <!-- ⚠️ 反面教材记录（2026-09-18，实测后回退）：
+         曾为「点击小组件按钮时不把 App 整屏拽到前台」而给 MainActivity 加过一个
+         `HomeWidgetTheme`（`android:windowIsTranslucent=true` +
+         `windowBackground=透明`）。**结果是 App 完全白屏**：冷启动后 Flutter
+         已经跑起来了（日志正常），但屏幕上只有壁纸/桌面，Flutter 视图一点都看不到，
+         而且所有点击都收不到。
+
+         原因：Flutter 在 Android 上通过 SurfaceView / FlutterImageView 渲染，
+         这类 surface 的 z-order 在宿主窗口**之下**。窗口一旦声明为 translucent，
+         系统就不再保证 surface 绘制在窗口之上，于是 Flutter 的内容被窗口"盖住"。
+         同一次实验还表明点击事件也进不来（取消/确认都无响应）。
+
+         结论：**只要一个 Activity 跑 Flutter，它的窗口就不能是 translucent**。
+         「后台启动、不抢前台」这个效果无法用同一个 Flutter Activity 实现 ——
+         要真正实现必须另起一个非 Flutter 的透明 Activity，或做第二个 FlutterEngine。
+         当前选择：接受"点击会切到 App"（确认层仍以底部弹层形式呈现，背后当前页面可见），
+         换取功能完整与不引入整屏白屏风险。详见 docs/WIDGET_PLAN.md §5。 -->
 </resources>

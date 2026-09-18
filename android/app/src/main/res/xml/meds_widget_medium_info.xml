@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  中尺寸用药小组件。
+  尺寸按 Android 单元格公式 70*n - 30：4 列 → 250dp。
+  高度取 3 行（180dp）而非 2 行：实测 4x2 的实际渲染高度约 203dp，
+  而「三行药 + 近 7 天底栏」需要约 234dp，4x2 会裁掉底栏。
+  按「三行药+底栏不裁切为准」的验收条件，此处锁定 4x3。
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="250dp"
+    android:minHeight="180dp"
+    android:targetCellWidth="4"
+    android:targetCellHeight="3"
+    android:minResizeWidth="180dp"
+    android:minResizeHeight="180dp"
+    android:maxResizeWidth="420dp"
+    android:maxResizeHeight="360dp"
+    android:resizeMode="horizontal|vertical"
+    android:updatePeriodMillis="1800000"
+    android:initialLayout="@layout/glance_default_loading_layout"
+    android:previewImage="@mipmap/ic_launcher"
+    android:description="@string/meds_widget_medium_description"
+    android:widgetCategory="home_screen" />

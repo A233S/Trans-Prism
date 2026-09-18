@@ -1,6 +1,7 @@
 import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
@@ -14,6 +15,7 @@ import 'screens/disclaimer_view_screen.dart';
 import 'screens/onboarding/onboarding_wizard.dart';
 import 'screens/hormone_converter_screen.dart';
 import 'screens/image_converter_screen.dart';
+import 'screens/inventory_dashboard_screen.dart';
 import 'screens/medical_directory/medical_directory_list_screen.dart';
 import 'screens/tracker_screen.dart';
 import 'screens/medication_cost_screen.dart';
@@ -46,6 +48,18 @@ import 'storage/gender_identity_repository.dart';
 import 'theme/glass_tokens.dart';
 import 'theme/glass_theme.dart';
 import 'utils/data_migration_service.dart';
+
+/// 全局 Navigator key —— 供桌面小组件动作从任意位置发起页面跳转。
+final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
+
+/// 桌面小组件动作 → 主界面 Tab 切换的轻量广播通道。
+///
+/// 置为目标 index，由 MainDashboard 消费后立即清空，避免重复触发。
+final ValueNotifier<int?> widgetTabRequest = ValueNotifier<int?>(null);
+
+/// 桌面用药小组件动作通道，与 Android 侧 MainActivity 的 CHANNEL_WIDGET 对应。
+const MethodChannel _widgetChannel =
+    MethodChannel('com.daanser.transprism/widget_action');
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -679,6 +693,7 @@ class _TransToolboxAppState extends State<TransToolboxApp> {
           tokens: tokens,
           child: MaterialApp(
             title: 'Trans Prism',
+            navigatorKey: appNavigatorKey,
             debugShowCheckedModeBanner: false,
             // liquid 模式禁用 Android stretch overscroll：BackdropFilter 透镜
             // 在 overscroll 隔离层内会渲染黑色（liquid_glass_easy 已知约束）。
@@ -731,6 +746,7 @@ class _AppRootControllerState extends State<AppRootController> {
     TrackerUpdateService.instance.checkAndUpdate();
     _initNotifications();
     _initResourceService();
+    _initWidgetActions();
   }
 
   Future<void> _initNotifications() async {
@@ -752,6 +768,96 @@ class _AppRootControllerState extends State<AppRootController> {
     } catch (e) {
       debugPrint('⚠️ [TP-Debug] 启动自愈失败(非致命): $e');
     }
+  }
+
+  // ──────────────────────────────────────────────
+  // 桌面用药小组件动作接线
+  //
+  // 小组件只负责「展示」与「发动作」；打卡等业务一律回到这里执行
+  // MedicationService.executeMedicationDose —— 业务逻辑零复制、零新增存储。
+  // ──────────────────────────────────────────────
+
+  /// 注册热启动推送，并拉取冷启动时暂存的动作。
+  Future<void> _initWidgetActions() async {
+    _widgetChannel.setMethodCallHandler((call) async {
+      if (call.method == 'onWidgetAction' && call.arguments is Map) {
+        await _dispatchWidgetAction(
+          Map<String, dynamic>.from(call.arguments as Map),
+        );
+      }
+      return null;
+    });
+
+    try {
+      final launch =
+          await _widgetChannel.invokeMethod<dynamic>('getLaunchAction');
+      if (launch is Map) {
+        await _dispatchWidgetAction(Map<String, dynamic>.from(launch));
+      }
+    } catch (e) {
+      debugPrint('⚠️ [TP-Widget] 拉取启动动作失败(非致命): $e');
+    }
+  }
+
+  /// 分发小组件动作。
+  Future<void> _dispatchWidgetAction(Map<String, dynamic> args) async {
+    final action = args['action'] as String?;
+    final drugId = args['drugId'] as String?;
+    final drugName = args['drugName'] as String?;
+    debugPrint('🧩 [TP-Widget] action=$action drugId=$drugId name=$drugName');
+
+    switch (action) {
+      case 'record_dose':
+        await _recordDoseFromWidget(drugId);
+        break;
+      case 'stock_alert':
+        await _openInventoryFromWidget();
+        break;
+      case 'open_meds':
+        // 首页即含用药模块（MedicationStockSummary）
+        widgetTabRequest.value = 0;
+        break;
+      default:
+        break;
+    }
+  }
+
+  /// 「记一次」—— 复用既有打卡 use case，随后刷新桌面卡片。
+  Future<void> _recordDoseFromWidget(String? drugId) async {
+    if (drugId == null || drugId.isEmpty) {
+      // 中卡顶部的通用「记一次」不绑定药物 → 回首页由用户选择
+      widgetTabRequest.value = 0;
+      return;
+    }
+
+    try {
+      final log = await MedicationService.executeMedicationDose(drugId);
+      if (log == null) {
+        debugPrint('⚠️ [TP-Widget] 打卡失败：未找到药物 $drugId');
+        widgetTabRequest.value = 0;
+        return;
+      }
+      // 库存与倒计时已变化 → 立即刷新桌面卡片
+      await _widgetChannel.invokeMethod<dynamic>('refreshWidgets');
+      if (!mounted) return;
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        const SnackBar(content: Text('已记录一次用药')),
+      );
+    } catch (e) {
+      debugPrint('⚠️ [TP-Widget] 打卡异常: $e');
+    }
+  }
+
+  /// 「库存告急」—— 打开既有库存仪表板。
+  Future<void> _openInventoryFromWidget() async {
+    final nav = appNavigatorKey.currentState;
+    if (nav == null) {
+      widgetTabRequest.value = 0;
+      return;
+    }
+    nav.push(
+      MaterialPageRoute(builder: (_) => const InventoryDashboardScreen()),
+    );
   }
 
   /// 初始化 JSON 驱动的资源服务并运行搜索测试
@@ -1131,8 +1237,26 @@ class _MainDashboardState extends State<MainDashboard> {
   void initState() {
     super.initState();
     _loadModuleVisibility();
+    // 桌面小组件动作 → Tab 切换
+    widgetTabRequest.addListener(_onWidgetTabRequest);
     // 首页渲染完成后静默检测更新
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkForUpdate());
+  }
+
+  @override
+  void dispose() {
+    widgetTabRequest.removeListener(_onWidgetTabRequest);
+    super.dispose();
+  }
+
+  /// 响应桌面小组件发起的 Tab 切换请求（消费后立即清空）。
+  void _onWidgetTabRequest() {
+    final target = widgetTabRequest.value;
+    if (target == null || !mounted) return;
+    widgetTabRequest.value = null;
+    if (target != _currentIndex) {
+      setState(() => _currentIndex = target);
+    }
   }
 
   /// 从 SharedPreferences 加载模块可见性
