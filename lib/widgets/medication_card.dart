@@ -3,7 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../models/drug_model.dart';
+import '../services/medication_cost_service.dart';
 import '../services/medication_service.dart';
+import '../utils/currency.dart';
 import 'branded_toast.dart';
 import 'record_dose_dialog.dart';
 
@@ -33,6 +35,12 @@ class MedicationCard extends StatefulWidget {
   /// 补仓
   final VoidCallback? onAddStock;
 
+  /// 成本明细（由父级传入）。null = 尚未计算，此时不显示花费行。
+  final DrugCost? cost;
+
+  /// 当前显示币种（仅影响符号与小数位，不换算汇率）
+  final Currency currency;
+
   const MedicationCard({
     super.key,
     required this.drug,
@@ -41,6 +49,8 @@ class MedicationCard extends StatefulWidget {
     this.onEdit,
     this.onDelete,
     this.onAddStock,
+    this.cost,
+    this.currency = CurrencyFormat.cny,
   });
 
   @override
@@ -449,6 +459,7 @@ class _MedicationCardState extends State<MedicationCard> {
   // ──────── 4. 库存信息面板（灰底圆角） ────────
 
   Widget _buildStockPanel(bool isDark, double percentage, Drug drug) {
+    final costLine = _costLine();
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
@@ -485,9 +496,51 @@ class _MedicationCardState extends State<MedicationCard> {
               _infoCell('日消耗', '${drug.dailyBurnRate.toStringAsFixed(1)} 单位'),
             ],
           ),
+          if (costLine != null) ...[
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Icon(
+                  Icons.payments_outlined,
+                  size: 12,
+                  color: Colors.grey.shade400,
+                ),
+                const SizedBox(width: 4),
+                Flexible(
+                  child: Text(
+                    costLine,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey.shade600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
+  }
+
+  /// 「单次花费」文案；`cost == null`（尚未计算）→ null，不渲染该行。
+  ///
+  /// ⚠️ 判断是否已定价**必须用 `costPerDose == null`**，**绝不能用 `spent == 0`** ——
+  /// 赠药（`totalPrice == 0`）是合法价格，其 `spent` 同样是 `0.0`，但它**已定价**。
+  String? _costLine() {
+    final c = widget.cost;
+    if (c == null) return null;
+    if (c.costPerDose == null) {
+      return '单次花费 ${CurrencyFormat.emptyPlaceholder} · 补货时填价格即可估算';
+    }
+    final perDose = CurrencyFormat.format(c.costPerDose, widget.currency);
+    final monthly = c.monthlyCost == null
+        ? null
+        : CurrencyFormat.format(c.monthlyCost, widget.currency);
+    return monthly == null
+        ? '单次花费 $perDose'
+        : '单次花费 $perDose ｜ 月 $monthly';
   }
 
   Widget _infoCell(String label, String value) {

@@ -131,6 +131,27 @@ class MedicationService {
     await prefs.setString(_drugStorageKey, Drug.listToJson(drugs));
   }
 
+  /// 按 id 覆盖或新增一个药物并持久化（供换算表学习等就地更新使用）
+  ///
+  /// 与 `InventoryDashboardScreen` 共用同一存储键 `drug_inventory_list`。
+  /// 典型用途：补货面板学到「1 针 = 5 mg」后，把该药物的
+  /// `specConversions` 写回并落库。
+  static Future<void> upsertDrug(Drug drug) async {
+    final prefs = await SharedPreferences.getInstance();
+    final drugs = await _loadDrugs(prefs);
+    final index = drugs.indexWhere((d) => d.id == drug.id);
+    if (index == -1) {
+      drugs.add(drug);
+      debugPrint('💰 [TP-Cost] upsertDrug: 新增药物 id=${drug.id}');
+    } else {
+      drugs[index] = drug;
+      debugPrint('💰 [TP-Cost] upsertDrug: 覆盖药物 id=${drug.id}');
+    }
+    await _saveDrugs(prefs, drugs);
+    debugPrint(
+        '💰 [TP-Cost] upsertDrug 已持久化: doseUnit=${drug.doseUnit}, specConversions=${drug.specConversions}');
+  }
+
   // ──────────────────────────────────────────────
   // 用药日志读写
   // ──────────────────────────────────────────────

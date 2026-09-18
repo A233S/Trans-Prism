@@ -41,6 +41,32 @@
 | [`notification_service.dart`](lib/services/notification_service.dart:14) | 用药提醒通知调度 + 启动自愈补挂（`restoreMissingSchedules`） |
 | [`medication_profile_repository.dart`](lib/storage/medication_profile_repository.dart:14) | 给药日志 JSON 持久化 |
 
+### 1b. 用药成本 / 价格计算器（v1.7.0 新增）
+
+| 文件 | 职责 |
+|------|------|
+| [`medication_purchase.dart`](lib/models/medication_purchase.dart:13) | 补货价格 + 规格记录模型（`totalPrice` / `specQuantity` / `specUnit` / `doses`）；JSON 全容错 |
+| [`medication_price_repository.dart`](lib/storage/medication_price_repository.dart:17) | 价格记录 SP 持久化，key = `medication_purchase_records` |
+| [`medication_cost_service.dart`](lib/services/medication_cost_service.dart:130) | **纯函数**成本统计：`avgCostPerDose` = `ΣtotalPrice / Σdoses`、`resolveDoses`（换算表折算）、`summarize` → `DrugCost` / `MedicationCostSummary` |
+| [`currency.dart`](lib/utils/currency.dart:37) | 币种定义 + 金额格式化 + SP 持久化（key = `cost_currency_code`）；**只换符号不换算汇率** |
+| [`restock_sheet.dart`](lib/widgets/restock_sheet.dart:31) | 补货面板：数量 + 总价/单价 + 规格 + 换算学习（未知单位就地学 `1 针 = 5 mg`） |
+| [`medication_cost_screen.dart`](lib/screens/medication_cost_screen.dart:29) | 成本详情页：分药明细 + 补货历史 + 累计支出趋势 |
+| [`medication_report_view.dart`](lib/widgets/medication_report_view.dart:44) | 报告长图 Widget（**预览与导出同源**，固定 750px，打码唯一出口 `_buildMaskMap`） |
+| [`medication_report_renderer.dart`](lib/services/medication_report_renderer.dart:44) | Widget → PNG 栅格化 + **长图自动分片**（`MedicationReportBoundary` 子类合法暴露 `layer`，再按局部矩形 `toImage`） |
+| [`medication_report_export_screen.dart`](lib/screens/medication_report_export_screen.dart:28) | 导出配置页：3 模式 × 打码 × 时间/药物范围 + 实时预览 + 相册/文件/分享 |
+
+> **核心口径**：本 app 的 `dosage` / `currentStock` **没有单位**，因此成本统计锚定在**「够用次数」**而不是任何度量单位：
+> `单次使用费用（平均）= Σ本次花费 / Σ够用次数`。按次数加权让**总额天然自洽**（先 `¥30/14次` 再 `¥40/14次` → 均价 `¥2.50/次`，28 次 × 2.50 = **¥70 = 真实总支出**），
+> 所以**打卡流程零改动**、[`MedicationLog`](lib/models/medication_log.dart:8) 结构不变（不需要逐次价格快照）。
+>
+> **两个易踩的坑（改这块代码前必读）**：
+> 1. 判断「未设价格」**必须用 `DrugCost.costPerDose == null`**，**不能用 `spent == 0`** —— 赠药（`totalPrice == 0`）是合法价格，`spent` 同样是 `0.0` 但它**已定价**。
+> 2. `_DrugFormPage._submit()` 是**新建 `Drug(...)`**（不是 `copyWith`），编辑药物时**必须显式带上 `doseUnit` / `specConversions`**，否则用户编辑一次药物就**静默丢失**刚配好的剂量单位与换算表。
+>
+> **数据流**：价格有**两个录入口** —— ① **首次添加药物**时表单里的「首次购入价格（选填）」折叠区（默认收起留空，编辑药物时不出现）；② 已存在药物的**补货面板**。
+> 两者语义一致（按总价/单价、规格、够用次数），都产出 `MedicationPurchase` → SP `medication_purchase_records` → `MedicationCostService` → 卡片「单次花费」/ 仪表盘汇总卡 / 首页摘要 / 成本详情页 / 导出 PNG。
+> 价格与补货**完全解耦**：留空只加库存、不写价格记录；未定价药物**不计入任何合计**（不是按 0 元算）。
+
 ### 2. 血药浓度 PK 模拟
 
 | 文件 | 职责 |
@@ -156,6 +182,8 @@
 |----------|------|----------|
 | `SharedPreferences` JSON | 药物库存 | `drug_inventory_list` |
 | `SharedPreferences` JSON | 给药日志 | `medication_logs` |
+| `SharedPreferences` JSON | 补货价格 / 规格记录 | `medication_purchase_records` |
+| `SharedPreferences` 直接 string | 成本展示币种（仅符号） | `cost_currency_code` |
 | `SharedPreferences` JSON | 嗓音训练事件 | `voice_training_events` |
 | `SharedPreferences` JSON | 罩杯发育记录 | `bra_growth_records` |
 | `SharedPreferences` JSON | 医疗名录收藏 | `medical_directory_favorites` |

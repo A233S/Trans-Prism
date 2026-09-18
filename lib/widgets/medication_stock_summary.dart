@@ -3,6 +3,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/drug_model.dart';
 import '../screens/inventory_dashboard_screen.dart';
+import '../services/medication_cost_service.dart';
+import '../storage/medication_price_repository.dart';
+import '../utils/currency.dart';
 import 'glass_surface.dart';
 
 /// =============================================================================
@@ -26,6 +29,9 @@ class _MedicationStockSummaryState extends State<MedicationStockSummary> {
   List<Drug> _drugs = [];
   bool _isLoading = true;
 
+  /// 「月花费 ¥xx」摘要文案；**无已定价药物时保持 null → 整段不显示**（不留空位）
+  String? _monthlyCostText;
+
   @override
   void initState() {
     super.initState();
@@ -47,7 +53,26 @@ class _MedicationStockSummaryState extends State<MedicationStockSummary> {
       });
     }
     if (!mounted) return;
-    setState(() => _isLoading = false);
+
+    // 月花费摘要（仅统计已定价药物；没有则保持 null，UI 整段不显示）
+    String? monthlyText;
+    try {
+      final purchases = await MedicationPriceRepository().getAll();
+      final summary = MedicationCostService.summarize(_drugs, purchases);
+      if (summary.pricedDrugCount > 0) {
+        final currency = await CurrencyFormat.current();
+        monthlyText =
+            '月花费 ${CurrencyFormat.format(summary.totalMonthlyCost, currency)}';
+      }
+    } catch (e) {
+      debugPrint('💰 [TP-Cost] 首页月花费摘要计算失败: $e');
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _monthlyCostText = monthlyText;
+      _isLoading = false;
+    });
   }
 
   @override
@@ -244,6 +269,17 @@ class _MedicationStockSummaryState extends State<MedicationStockSummary> {
                         : (isWarning ? warningColor : secondaryColor),
                   ),
                 ),
+                if (_monthlyCostText != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    _monthlyCostText!,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: secondaryColor,
+                    ),
+                  ),
+                ],
               ],
             ),
           ),

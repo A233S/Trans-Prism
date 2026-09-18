@@ -16,6 +16,7 @@ import 'screens/hormone_converter_screen.dart';
 import 'screens/image_converter_screen.dart';
 import 'screens/medical_directory/medical_directory_list_screen.dart';
 import 'screens/tracker_screen.dart';
+import 'screens/medication_cost_screen.dart';
 import 'services/tracker_update_service.dart';
 import 'screens/svg_resource_gallery_screen.dart';
 import 'screens/voice_training/voice_training_home.dart';
@@ -30,6 +31,7 @@ import 'services/update_service.dart';
 import 'services/wiki_sync_service.dart';
 import 'services/theme_service.dart';
 import 'services/tracker_port_config.dart';
+import 'utils/currency.dart';
 import 'widgets/gradient_icon.dart';
 import 'widgets/loading_indicator.dart';
 import 'widgets/medication_stock_summary.dart';
@@ -1938,6 +1940,9 @@ class _ProfileTabState extends State<ProfileTab> {
   bool _customPrefix = false;
   late TextEditingController _customPrefixController;
 
+  /// 用药成本展示币种（**仅换符号与小数位，不换算汇率**）
+  Currency _currency = CurrencyFormat.cny;
+
   static const _prefixOptions = {
     '': '不显示',
     'Mr': 'Mr.',
@@ -1952,6 +1957,7 @@ class _ProfileTabState extends State<ProfileTab> {
   @override
   void initState() {
     super.initState();
+    _loadCurrency();
     // 默认称呼"伙伴"不再预填入输入框，而是作为占位符"默认：伙伴"显示；
     // 仅当用户设过自定义称呼时才回填，便于区分默认值与自定义值。
     _greetingController = TextEditingController(
@@ -2238,6 +2244,40 @@ class _ProfileTabState extends State<ProfileTab> {
           title: '血药浓度模拟端口',
           subtitle: null,
           onTap: () => _showTrackerPortSheet(context),
+        ),
+
+        // ── 用药成本明细入口 ──
+        _buildSettingsTile(
+          isDark: isDark,
+          leadingIcon: Icons.receipt_long_outlined,
+          leadingColor: themeService.themeColor,
+          title: '用药成本明细',
+          subtitle: null,
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => const MedicationCostScreen(),
+              ),
+            );
+          },
+        ),
+        // ── 成本币种入口 ──
+        // 币种是**纯显示层**设置：只更换金额符号与小数位，不做汇率换算（决策 D5）。
+        _buildSettingsTile(
+          isDark: isDark,
+          leadingIcon: Icons.payments_outlined,
+          leadingColor: themeService.themeColor,
+          title: '成本币种',
+          subtitle: null,
+          trailing: Text(
+            '${_currency.symbol} ${_currency.label}',
+            style: TextStyle(
+              fontSize: 12,
+              color: isDark ? Colors.white70 : const Color(0xFF8A8A86),
+            ),
+          ),
+          onTap: () => _showCurrencySheet(context),
         ),
 
         // ═══════════════════════════════════════════════
@@ -2985,6 +3025,108 @@ class _ProfileTabState extends State<ProfileTab> {
               ),
           ],
         ),
+      ),
+    );
+  }
+
+  // ════════════════════════════════════════════════════════════
+  //  用药成本设置（币种）
+  // ════════════════════════════════════════════════════════════
+
+  Future<void> _loadCurrency() async {
+    final c = await CurrencyFormat.current();
+    if (!mounted) return;
+    setState(() => _currency = c);
+  }
+
+  /// 币种选择弹层。
+  ///
+  /// ⚠️ 币种是**纯显示层**设置：只更换金额符号与小数位，
+  /// **不做任何汇率换算** —— 这句话必须在 UI 上写明（决策 D5）。
+  Future<void> _showCurrencySheet(BuildContext context) async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final secondaryColor =
+        isDark ? Colors.white70 : const Color(0xFF8A8A86);
+
+    final selected = await showModalBottomSheet<Currency>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return Container(
+          decoration: BoxDecoration(
+            color: Theme.of(ctx).scaffoldBackgroundColor,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                '用药成本 · 币种',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                '仅更换显示符号，不做汇率换算。',
+                style: TextStyle(fontSize: 12, color: secondaryColor),
+              ),
+              const SizedBox(height: 12),
+              Flexible(
+                child: SingleChildScrollView(
+                  child: Column(
+                    children: [
+                      for (final c in CurrencyFormat.presets)
+                        ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(
+                            '${c.symbol}  ${c.label}',
+                            style: const TextStyle(fontSize: 14),
+                          ),
+                          subtitle: Text(
+                            c.code,
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                          trailing: c.code == _currency.code
+                              ? Icon(
+                                  Icons.check_rounded,
+                                  color: Theme.of(ctx).colorScheme.primary,
+                                )
+                              : null,
+                          onTap: () => Navigator.pop(ctx, c),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (selected == null) return;
+    await CurrencyFormat.set(selected);
+    if (!mounted) return;
+    setState(() => _currency = selected);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('币种已切换为 ${selected.symbol} ${selected.label}（仅显示符号）'),
+        behavior: SnackBarBehavior.floating,
       ),
     );
   }

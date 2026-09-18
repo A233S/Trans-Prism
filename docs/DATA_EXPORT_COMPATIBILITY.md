@@ -215,3 +215,27 @@ React fiber 树遍历（`__reactFiber$`）是 React 内部 API，**非公开接�
 - [ ] 导入不含 PK 数据的旧备份（无分隔符）→ 仅恢复 SP 数据，不报错
 - [ ] TrackerScreen 独立导出 → 生成 `trans_prism_pk_backup.json`，仅含 PK 数据
 - [ ] TrackerScreen 独立导入 → PK 数据恢复，WebView 自动刷新
+
+---
+
+## 7. v1.7.0「用药成本」新增的存储项（备份**自动覆盖**，无需改代码）
+
+「用药成本 / 价格计算器」新增了 2 个 `SharedPreferences` key。因为
+[`exportData()`](../lib/utils/data_migration_service.dart:48) 是**全量遍历 `prefs.getKeys()`** 导出、
+[`importData()`](../lib/utils/data_migration_service.dart:110) 也是**全量回写**，所以
+**`data_migration_service.dart` 一行都不用改**。
+
+| Key | 内容 | 缺失 / 老备份时的行为 |
+|---|---|---|
+| `medication_purchase_records` | `MedicationPurchase[]` JSON（补货的价格 / 规格 / 够用次数） | 恢复后为空列表 → 全部药物显示「未设价格」，**不报错** |
+| `cost_currency_code` | 展示币种代码（如 `CNY`） | 回退 `CNY` |
+
+`Drug` 新增的 `doseUnit` / `specConversions` 两个字段**就地存在 `drug_inventory_list`** 里（随药物走），
+且 `toJson()` **仅在非 null 时写入** —— 老数据的 JSON **连 key 数量都不变**（已由单测锁死）。
+因此跨版本互操作是安全的：
+
+- **老版本 App 读新备份**：未知 key 被 `_setValue` 原样写入 SP，**无害**；
+- **新版本 App 读老备份**：字段缺失 → `null` / 空列表 → 全部正常显示为「未设价格」，**不崩**。
+
+> 注意：`medication_purchase_records` 里存的是**金额数字**，不含任何币种信息。切换币种只改显示符号，
+> **不会换算历史数字**（决策 D5，见 [`MED_PRICE_PLAN.md`](MED_PRICE_PLAN.md:1) §3.8）。

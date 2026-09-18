@@ -80,6 +80,20 @@ class Drug {
   // ───────────── 公共 ─────────────
   DateTime? nextDoseTime; // 计算得出的下次给药时间
 
+  // ───────────── 价格统计辅助（全部可选，老数据兼容） ─────────────
+
+  /// 「每次剂量」的单位，如 'mg' / '片' / '针'；null = 未设置
+  ///
+  /// 仅用于**价格统计时把规格折合为「够用几次」**，
+  /// 不改变既有 `dosage` / `currentStock` 的库存语义（仍是无单位纯数字）。
+  String? doseUnit;
+
+  /// 规格单位 → 折合多少个 [doseUnit]。如 `{'针': 5}` 表示 1 针 = 5 mg。
+  ///
+  /// 规格单位与 [doseUnit] 相同时无需登记（隐式系数 1）。
+  /// 非 final：补货面板「记住换算」时会**就地写入**该药物的换算表。
+  Map<String, double>? specConversions;
+
   Drug({
     required this.id,
     required this.name,
@@ -90,6 +104,8 @@ class Drug {
     this.nextDoseTime,
     List<String>? dailyReminderTimes,
     this.reminderEnabled = true,
+    this.doseUnit,
+    this.specConversions,
   }) : dailyReminderTimes = dailyReminderTimes ?? [];
 
   // ==================== 模式判断 ====================
@@ -336,6 +352,9 @@ class Drug {
       // 公共
       'nextDoseTime': nextDoseTime?.toIso8601String(),
       'reminderEnabled': reminderEnabled,
+      // 价格统计辅助（非 null 才写入 → 老数据 toJson 输出保持原样）
+      if (doseUnit != null) 'doseUnit': doseUnit,
+      if (specConversions != null) 'specConversions': specConversions,
     };
   }
 
@@ -363,7 +382,44 @@ class Drug {
 
       nextDoseTime: nextDoseStr != null ? DateTime.parse(nextDoseStr) : null,
       reminderEnabled: json['reminderEnabled'] as bool? ?? true,
+
+      // 价格统计辅助：老数据缺这两个 key → null，逐字段与改动前完全一致
+      doseUnit: _parseDoseUnit(json['doseUnit']),
+      specConversions: _parseSpecConversions(json['specConversions']),
     );
+  }
+
+  /// 容错解析剂量单位：非字符串（含 null）→ null，绝不抛异常
+  static String? _parseDoseUnit(dynamic raw) {
+    if (raw is String) {
+      final trimmed = raw.trim();
+      return trimmed.isEmpty ? null : trimmed;
+    }
+    return null;
+  }
+
+  /// 容错解析规格换算表：非 Map → null；非法 key/value **跳过而不抛错**
+  ///
+  /// 合法的空 Map 会原样保留（`{}`），只有「字段不存在 / 类型不对」才返回 null，
+  /// 以保证 `toJson` / `fromJson` 往返稳定。
+  static Map<String, double>? _parseSpecConversions(dynamic raw) {
+    if (raw is! Map) return null;
+    final result = <String, double>{};
+    raw.forEach((key, value) {
+      if (key is! String) return;
+      final k = key.trim();
+      if (k.isEmpty) return;
+      double? v;
+      if (value is num) {
+        v = value.toDouble();
+      } else if (value is String) {
+        v = double.tryParse(value.trim());
+      }
+      if (v != null && v.isFinite) {
+        result[k] = v;
+      }
+    });
+    return result;
   }
 
   static List<Drug> listFromJson(String jsonStr) {
@@ -385,6 +441,10 @@ class Drug {
     List<String>? dailyReminderTimes,
     DateTime? nextDoseTime,
     bool? reminderEnabled,
+    String? doseUnit,
+    Map<String, double>? specConversions,
+    bool clearDoseUnit = false,
+    bool clearSpecConversions = false,
   }) {
     return Drug(
       id: id ?? this.id,
@@ -397,6 +457,11 @@ class Drug {
           dailyReminderTimes ?? List<String>.from(this.dailyReminderTimes),
       nextDoseTime: nextDoseTime ?? this.nextDoseTime,
       reminderEnabled: reminderEnabled ?? this.reminderEnabled,
+      // 需要清空时必须显式传 clearX: true（否则传 null 表示「不修改」）
+      doseUnit: clearDoseUnit ? null : (doseUnit ?? this.doseUnit),
+      specConversions: clearSpecConversions
+          ? null
+          : (specConversions ?? this.specConversions),
     );
   }
 }
