@@ -402,7 +402,7 @@ class _TrackerScreenState extends State<TrackerScreen>
     return Scaffold(
       appBar: AppBar(
         title: const Text('血药浓度模拟'),
-        backgroundColor: const Color(0xFFF5F4F0),
+        backgroundColor: const Color(0xFFFFFFFF),
         actions: [
           if (_loading && _error == null)
             const Padding(
@@ -420,7 +420,7 @@ class _TrackerScreenState extends State<TrackerScreen>
           Expanded(child: _buildBody()),
           if (_licenseInitialised && _licenseVisible)
             Container(
-              color: const Color(0xFFF5F4F0),
+              color: const Color(0xFFFFFFFF),
               padding: EdgeInsets.only(
                 bottom: MediaQuery.of(context).padding.bottom,
               ),
@@ -436,7 +436,7 @@ class _TrackerScreenState extends State<TrackerScreen>
     return Card(
       margin: const EdgeInsets.fromLTRB(12, 4, 12, 8),
       elevation: 0,
-      color: const Color(0xFFF5F4F0),
+      color: const Color(0xFFFFFFFF),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(10),
         side: const BorderSide(color: Color(0xFFE8E6E0)),
