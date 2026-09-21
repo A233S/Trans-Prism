@@ -1,0 +1,270 @@
+# ───────────────────────────────────────────────────────────────────────
+#  编译未签名 iOS IPA
+#
+#  · 不依赖任何 Apple 证书 / 描述文件，产物为纯未签名 IPA，
+#    交给 AltStore / SideStore / Sideloadly / TrollStore 等工具自行签名安装。
+#  · MinimumOSVersion 取自 ios/Runner.xcodeproj 的 IPHONEOS_DEPLOYMENT_TARGET
+#    （当前 13.0），因此 iOS 13 ~ 最新系统（含 iOS 16）均可安装。
+#  · 触发方式：
+#      ① Actions 页面手动 Run workflow（仅产出 Artifact）
+#      ② 推送 v* 标签（额外把 IPA 作为附件上传到对应 Release）
+# ───────────────────────────────────────────────────────────────────────
+
+name: Build Unsigned iOS IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      flutter_version:
+        description: 'Flutter 版本（留空 = stable 最新版）'
+        required: false
+        type: string
+        default: ''
+      ios_deployment_target:
+        description: '临时覆盖 iOS 最低版本，如 16.0（留空 = 用仓库里的 13.0）'
+        required: false
+        type: string
+        default: ''
+      build_name:
+        description: '覆盖 CFBundleShortVersionString（留空 = 用 pubspec.yaml）'
+        required: false
+        type: string
+        default: ''
+      build_number:
+        description: '覆盖 CFBundleVersion（留空 = 用 pubspec.yaml）'
+        required: false
+        type: string
+        default: ''
+
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ios-ipa-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IPA_NAME: TransPrism-ios-unsigned
+
+jobs:
+  build-ipa:
+    name: 🍎 编译未签名 IPA
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    steps:
+      - name: 🗂️ 检出代码库
+        uses: actions/checkout@v4
+
+      - name: 🛠️ 选择可用的最新 Xcode
+        run: |
+          set -euo pipefail
+          LATEST_XCODE="$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -n 1 || true)"
+          if [ -n "$LATEST_XCODE" ]; then
+            sudo xcode-select -s "${LATEST_XCODE}/Contents/Developer"
+          fi
+          xcodebuild -version
+
+      - name: 🐦 安装 Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ inputs.flutter_version }}
+          cache: true
+
+      - name: ℹ️ 打印构建环境
+        run: |
+          flutter --version
+          pod --version || true
+          sw_vers
+
+      - name: 🧮 解析版本号与 deployment target
+        env:
+          DEPLOY_TARGET_OVERRIDE: ${{ inputs.ios_deployment_target }}
+        run: |
+          set -euo pipefail
+
+          # pubspec.yaml 的 version: 1.7.0+2 拆成 name / build number
+          VERSION_LINE="$(grep -m1 '^version:' pubspec.yaml | awk '{print $2}')"
+          APP_VERSION="${VERSION_LINE%%+*}"
+          APP_BUILD="${VERSION_LINE##*+}"
+          if [ "$APP_BUILD" = "$VERSION_LINE" ]; then
+            APP_BUILD="1"
+          fi
+
+          # 仓库当前的 iOS 最低版本
+          MIN_OS="$(grep -m1 -o 'IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*' ios/Runner.xcodeproj/project.pbxproj \
+                    | awk '{print $3}' | tr -d ';')"
+          if [ -z "${MIN_OS}" ]; then
+            MIN_OS="13.0"
+          fi
+
+          # 可选：本次构建临时抬高最低版本（只改工作区，不写回仓库）
+          if [ -n "${DEPLOY_TARGET_OVERRIDE}" ]; then
+            if ! printf '%s' "${DEPLOY_TARGET_OVERRIDE}" | grep -Eq '^[0-9]+\.[0-9]+$'; then
+              echo "❌ ios_deployment_target 格式错误：${DEPLOY_TARGET_OVERRIDE}（应形如 16.0）"
+              exit 1
+            fi
+            sed -i '' -E \
+              "s/IPHONEOS_DEPLOYMENT_TARGET = [0-9]+\.[0-9]+;/IPHONEOS_DEPLOYMENT_TARGET = ${DEPLOY_TARGET_OVERRIDE};/g" \
+              ios/Runner.xcodeproj/project.pbxproj
+            if grep -Eq '^# *platform :ios' ios/Podfile; then
+              sed -i '' -E "s/^# *platform :ios.*/platform :ios, '${DEPLOY_TARGET_OVERRIDE}'/" ios/Podfile
+            else
+              sed -i '' -E "s/^platform :ios.*/platform :ios, '${DEPLOY_TARGET_OVERRIDE}'/" ios/Podfile
+            fi
+            MIN_OS="${DEPLOY_TARGET_OVERRIDE}"
+            echo "ℹ️  本次构建临时覆盖 iOS 最低版本为 ${MIN_OS}"
+          fi
+
+          {
+            echo "APP_VERSION=${APP_VERSION}"
+            echo "APP_BUILD=${APP_BUILD}"
+            echo "MIN_OS=${MIN_OS}"
+            echo "IPA_FILE=${IPA_NAME}-${APP_VERSION}.ipa"
+          } >> "$GITHUB_ENV"
+
+          echo "版本 ${APP_VERSION} (${APP_BUILD}) / 最低系统 iOS ${MIN_OS}"
+
+      - name: 📦 拉取依赖
+        run: flutter pub get
+
+      - name: 💾 缓存 CocoaPods
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/CocoaPods
+          key: ${{ runner.os }}-pods-${{ hashFiles('ios/Podfile.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pods-
+
+      - name: 🏗️ 编译 iOS（Release / 不签名）
+        shell: bash   # 下面用到数组，必须是 bash
+        env:
+          BUILD_NAME: ${{ inputs.build_name }}
+          BUILD_NUMBER: ${{ inputs.build_number }}
+        run: |
+          set -euo pipefail
+          ARGS=(--release --no-codesign)
+          if [ -n "${BUILD_NAME}" ]; then
+            ARGS+=(--build-name "${BUILD_NAME}")
+          fi
+          if [ -n "${BUILD_NUMBER}" ]; then
+            ARGS+=(--build-number "${BUILD_NUMBER}")
+          fi
+          echo "flutter build ios ${ARGS[*]}"
+          flutter build ios "${ARGS[@]}"
+
+      - name: 📦 打包为未签名 IPA
+        run: |
+          set -euo pipefail
+          APP="build/ios/iphoneos/Runner.app"
+          if [ ! -d "${APP}" ]; then
+            echo "❌ 未找到构建产物 ${APP}"
+            exit 1
+          fi
+
+          rm -rf dist
+          mkdir -p dist/Payload
+          cp -R "${APP}" dist/Payload/Runner.app
+
+          PLIST="dist/Payload/Runner.app/Info.plist"
+
+          # --no-codesign 会跳过 ProcessProductPackaging，Info.plist 里通常
+          # 不含 MinimumOSVersion，部分安装器会据此拒绝安装，这里补上。
+          if /usr/libexec/PlistBuddy -c "Print :MinimumOSVersion" "${PLIST}" >/dev/null 2>&1; then
+            echo "ℹ️  构建已自带 MinimumOSVersion = $(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "${PLIST}")"
+          else
+            /usr/libexec/PlistBuddy -c "Add :MinimumOSVersion string ${MIN_OS}" "${PLIST}"
+            echo "✅ 已注入 MinimumOSVersion = ${MIN_OS}"
+          fi
+
+          # Payload/ 必须在压缩包根目录；-y 保留符号链接，-X 不带 macOS 扩展属性
+          ( cd dist && zip -qry -X "${IPA_FILE}" Payload )
+          ( cd dist && shasum -a 256 "${IPA_FILE}" > "${IPA_FILE}.sha256" )
+
+          ls -lh dist
+
+      - name: 🔍 校验产物并生成摘要
+        run: |
+          set -euo pipefail
+          IPA="dist/${IPA_FILE}"
+          rm -rf verify
+          unzip -q "${IPA}" -d verify
+          PLIST="verify/Payload/Runner.app/Info.plist"
+
+          echo "===== Info.plist 关键字段 ====="
+          for key in CFBundleIdentifier CFBundleShortVersionString CFBundleVersion MinimumOSVersion; do
+            printf '%-30s %s\n' "${key}" "$(/usr/libexec/PlistBuddy -c "Print :${key}" "${PLIST}")"
+          done
+
+          echo "===== 二进架构 ====="
+          lipo -info verify/Payload/Runner.app/Runner
+
+          echo "===== 签名状态 ====="
+          if [ -e verify/Payload/Runner.app/_CodeSignature ] || [ -e verify/Payload/Runner.app/embedded.mobileprovision ]; then
+            echo "⚠️  检测到签名残留，产物可能不是纯未签名"
+          else
+            echo "✅ 无 _CodeSignature / embedded.mobileprovision —— 纯未签名 IPA"
+          fi
+
+          ACTUAL_MIN_OS="$(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "${PLIST}")"
+          if ! printf '%s' "${ACTUAL_MIN_OS}" | grep -Eq '^[0-9]+(\.[0-9]+)?$'; then
+            echo "❌ MinimumOSVersion 取值异常：${ACTUAL_MIN_OS}"
+            exit 1
+          fi
+          ACTUAL_MAJOR="${ACTUAL_MIN_OS%%.*}"
+          if [ "${ACTUAL_MAJOR}" -gt 16 ]; then
+            echo "❌ MinimumOSVersion=${ACTUAL_MIN_OS} 高于 16，无法安装到 iOS 16"
+            exit 1
+          fi
+          echo "✅ MinimumOSVersion=${ACTUAL_MIN_OS} ≤ 16.0，可安装于 iOS 16"
+
+          ARCH="$(lipo -info verify/Payload/Runner.app/Runner | sed 's/.*: //')"
+          SHA="$(cut -d' ' -f1 "dist/${IPA_FILE}.sha256")"
+          SIZE="$(du -h "${IPA}" | cut -f1)"
+
+          {
+            echo "## 🍎 未签名 iOS IPA 构建完成"
+            echo ""
+            echo "| 项目 | 值 |"
+            echo "| --- | --- |"
+            echo "| 文件 | \`${IPA_FILE}\` |"
+            echo "| Bundle ID | \`$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "${PLIST}")\` |"
+            echo "| 版本 | ${APP_VERSION} (${APP_BUILD}) |"
+            echo "| MinimumOSVersion | ${ACTUAL_MIN_OS} |"
+            echo "| 架构 | ${ARCH} |"
+            echo "| 签名 | 未签名 |"
+            echo "| 大小 | ${SIZE} |"
+            echo "| SHA-256 | \`${SHA}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 📤 上传 Actions Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TransPrism-ios-unsigned-${{ env.APP_VERSION }}
+          path: |
+            dist/*.ipa
+            dist/*.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: 🚀 上传到 GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "ℹ️  Release ${TAG} 已存在，追加附件"
+          else
+            echo "ℹ️  未找到 Release ${TAG}，创建草稿（草稿不会触发 R2 同步）"
+            gh release create "${TAG}" --draft --title "${TAG}" \
+              --notes "Trans Prism ${APP_VERSION} (${APP_BUILD}) 未签名 iOS IPA，支持 iOS ${MIN_OS}+（含 iOS 16）。"
+          fi
+          gh release upload "${TAG}" dist/*.ipa dist/*.sha256 --clobber
+          echo "✅ 已上传到 Release ${TAG}"
