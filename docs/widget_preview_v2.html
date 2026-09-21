@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-page-node-id="cOM6gIU2WdoQnqNbBasLfB">
+<head data-page-node-id="f8DJRH4KOlWLL8UwHjSkUP">
+<meta charset="utf-8" data-page-node-id="ohjMSOOYSB2xM5nZbZNBWS">
+<title>Trans Prism 用药小组件 · v2 设计预览</title>
+<style>
+  :root{
+    --card:#FFFFFF; --title:#1A1A1A; --muted:#8A8580;
+    --pink:#E8899A; --cyan:#4AB8C8; --amber:#D4A017;
+    --track:#EDE8E4; --hairline:#EFE7E1; --onpink:#FFFFFF;
+    --hl-pink:#14E8899A; --hl-cyan:#144AB8C8;
+    --page:#F4F1EE; --page-fg:#333;
+  }
+  body.dark{
+    --card:#211C1A; --title:#F3EEEA; --muted:#A39A94;
+    --pink:#F0A3B0; --cyan:#6BC9D4; --amber:#E0B84A;
+    --track:#3A322E; --hairline:#3A322E; --onpink:#211C1A;
+    --hl-pink:#24F0A3B0; --hl-cyan:#246BC9D4;
+    --page:#0E0C0B; --page-fg:#EDE9E5;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:var(--page); color:var(--page-fg);
+    font-family:-apple-system,"PingFang SC","Noto Sans CJK SC",system-ui,sans-serif;
+    padding:32px 24px 64px; transition:background .2s,color .2s;
+  }
+  h1{font-size:20px;font-weight:800;margin-bottom:6px}
+  .sub{font-size:13px;color:var(--muted);line-height:1.7;margin-bottom:20px}
+  .sub code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+  .bar{display:flex;gap:10px;align-items:center;margin-bottom:28px;flex-wrap:wrap}
+  button{
+    font:inherit;font-size:13px;font-weight:600;padding:8px 16px;border-radius:999px;
+    border:1px solid var(--hairline);background:var(--card);color:var(--title);cursor:pointer;
+  }
+  button.on{background:var(--pink);color:var(--onpink);border-color:transparent}
+  .group{margin-bottom:40px}
+  .glabel{font-size:12px;font-weight:700;letter-spacing:.06em;color:var(--muted);
+    text-transform:uppercase;margin-bottom:14px}
+  .row{display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start}
+  .cell{display:flex;flex-direction:column;gap:8px}
+  .cap{font-size:11.5px;color:var(--muted);text-align:center}
+
+  /* ─────────── 3×4 中卡 ─────────── */
+  .medium{
+    width:250px;height:180px;background:var(--card);border-radius:24px;
+    padding:16px 20px 14px;display:flex;flex-direction:column;
+    box-shadow:0 1px 2px rgba(60,40,30,.04);
+  }
+  .mhead{display:flex;align-items:center;justify-content:space-between;height:22px;flex:0 0 auto}
+  .mtitle{font-size:13px;font-weight:500;color:var(--title)}
+  .pill{background:var(--pink);color:var(--onpink);font-size:11px;font-weight:700;
+    border-radius:12px;padding:4px 11px;line-height:14px;white-space:nowrap}
+  .rows{flex:1 1 auto;display:flex;flex-direction:column;padding-top:8px;min-height:0}
+  .mrow{border-radius:10px;padding:4px 8px;display:flex;flex-direction:column}
+  .mrow.next{background:var(--hl-cyan)}
+  .mrow.next.overdue{background:var(--hl-pink)}
+  .mrow + .mrow{margin-top:2px}
+  .mline{display:flex;align-items:center;width:100%}
+  .bar{width:3px;height:30px;border-radius:2px;background:transparent;flex:0 0 auto}
+  .bar.cyan{background:var(--cyan)} .bar.pink{background:var(--pink)}
+  .gap7{width:7px;flex:0 0 auto} .gap5{width:5px;flex:0 0 auto}
+  .ico{width:15px;height:15px;flex:0 0 auto;stroke:var(--muted);fill:none;
+    stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+  .dot{width:6px;height:6px;border-radius:50%;flex:0 0 auto}
+  .dot.cyan{background:var(--cyan)} .dot.pink{background:var(--pink)}
+  .mid{flex:1 1 auto;min-width:0;display:flex;flex-direction:column}
+  .mname{font-size:13px;font-weight:500;color:var(--title);white-space:nowrap;overflow:hidden}
+  .mstock{font-size:10.5px;color:var(--muted);white-space:nowrap;overflow:hidden}
+  .mtime{width:74px;flex:0 0 auto;text-align:right;font-size:12.5px;font-weight:500;
+    font-variant-numeric:tabular-nums}
+  .mtime.cyan{color:var(--cyan)} .mtime.pink{color:var(--pink)}
+  .pbar{margin:3px 0 0 43px;height:2px;border-radius:1px;background:var(--track);
+    position:relative;overflow:hidden}
+  .pbar i{position:absolute;left:0;top:0;bottom:0;border-radius:1px}
+  .week{flex:0 0 auto}
+  .week hr{border:0;border-top:1px solid var(--hairline);margin:6px 0}
+  .wline{display:flex;align-items:center;gap:0}
+  .wlabel{font-size:10.5px;font-weight:500;color:var(--muted);margin-right:10px}
+  .wdots{display:flex;align-items:center;gap:6px}
+  .wd{width:7px;height:7px;border-radius:50%;background:var(--pink)}
+  .wd.off{background:transparent;border:1px solid var(--track)}
+  .wcount{margin-left:auto;font-size:11px;font-weight:500;color:var(--title)}
+
+  /* ─────────── 2×2 小卡 ─────────── */
+  .small{
+    width:150px;height:150px;background:var(--card);border-radius:24px;
+    padding:12px 12px 10px;display:flex;flex-direction:column;
+    box-shadow:0 1px 2px rgba(60,40,30,.04);
+  }
+  .shead{display:flex;align-items:center;gap:5px;flex:0 0 auto}
+  .sname{font-size:11.5px;font-weight:500;color:var(--title);white-space:nowrap;
+    overflow:hidden;flex:1 1 auto;min-width:0}
+  .scrit{font-size:9.5px;font-weight:500;color:var(--amber);white-space:nowrap;flex:0 0 auto}
+  .sbody{flex:1 1 auto;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;min-height:0}
+  .ringwrap{position:relative;display:flex;align-items:center;justify-content:center;
+    flex:1 1 auto;min-height:0;width:100%}
+  .ringwrap svg{max-width:100%;max-height:100%}
+  .rcenter{position:absolute;inset:0;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:0}
+  .rnum{font-size:26px;font-weight:700;line-height:1}
+  .runit{font-size:9.5px;font-weight:500;color:var(--muted);line-height:1.3}
+  .sstate{font-size:10.5px;font-weight:500;margin-top:2px}
+  .sbtn{margin-top:4px;flex:0 0 auto;height:30px;border-radius:15px;background:var(--pink);
+    color:var(--onpink);font-size:11.5px;font-weight:700;display:flex;
+    align-items:center;justify-content:center}
+</style>
+</head>
+<body data-page-node-id="8cFIAUFZYKfXABrEpzHWsI">
+
+<div style="max-width:640px;margin:0 0 18px;padding:12px 16px;border-radius:12px;
+     background:#FFF4D6;border:1px solid #E8D9A8;color:#6B5A1E;font-size:13px;line-height:1.7">
+  <b>⚠️ 这是 v2 的历史设计稿，已不是当前实现。</b><br>
+  v3 起：右上角改为 muted 说明文字「点对应药物服药」（不再是粉胶囊）、
+  「下一剂」行改为中性极轻提亮（不再是品牌色大底）、三行间距固定 5px。
+  <br>当前设计对照稿见 <a href="widget_preview_v3.html" style="color:#8A6D1F">widget_preview_v3.html</a>。
+</div>
+<h1 data-page-node-id="SJfzy13dPbGW0miGt5NjlY">Trans Prism 用药小组件 · v2 设计预览</h1>
+<p class="sub" data-page-node-id="so4Bd9lhDPPGGPvUMqYhHF">
+  与实装同源：色值 / 尺寸 / 字号逐项取自
+  <code data-page-node-id="Zg9wI9IID9bqiEGKprKBx8">MedsWidgetTokens.kt</code>，布局逻辑对应
+  <code data-page-node-id="mig5D1AqmB1NtIjJu97Mip">MediumMedsWidget.kt</code> / <code data-page-node-id="A7AtRfV9haKh0q9FolxsNS">SmallMedsWidget.kt</code>。<br data-page-node-id="kaQiv4LLTFg9vIuZsHMZUx">
+  本页只是**设计对照稿**，真机像素仍以 Android Studio 的 Glance Preview / 真机为准。<br data-page-node-id="BzmyAmTmIeZtvwlh00EvaO">
+  环口径：<code data-page-node-id="fE1B3RSRaQQwJxt5gQOzfw">progress = 1 − 距下次剂量剩余分钟 / 给药间隔分钟</code>（已超 = 整圈）。
+</p>
+
+<div class="bar" data-page-node-id="nb95YQHptqo2sPCygn2q9k">
+  <button id="tLight" class="on" data-page-node-id="EPwo31S15dYb9ECfnQLh4r">浅色 token</button>
+  <button id="tDark" data-page-node-id="kO6sWS07v2dHGAhGkbmrpL">深色 token</button>
+  <span style="font-size:12px;color:var(--muted)" data-page-node-id="1AicmDG0QcosKhWUL7J0WX">
+    深浅色由 App 主题偏好决定（不跟壁纸、不跟系统，除非 App 设为「跟随系统」）
+  </span>
+</div>
+
+<div class="group" data-page-node-id="FTc3FSTAAtDtwyXP8u5EZ6">
+  <div class="glabel" data-page-node-id="lUFAvEx00ucTs7oYGrnfcB">3×4 一览 · 下一剂高亮 + 整行可点 + 右上「记 {药名}」</div>
+  <div class="row" data-page-node-id="rjoNRVta84ZgZ3lh6SO9m7">
+    <div class="cell" data-page-node-id="NGX7fSN9DMuJdur3miqwNX">
+      <div class="medium" data-page-node-id="BxtwDnU2RTZ8D070W94kv3">
+        <div class="mhead" data-page-node-id="3eZ3RVIK1RfxeHF2jyPECs">
+          <div class="mtitle" data-page-node-id="eAFhjMuOXeKuqrdaNlMCro">今日 1/4</div>
+          <div class="pill" data-page-node-id="8ajbcVzRW0a6zkV5AOKTxh">记 黄体酮注射液</div>
+        </div>
+        <div class="rows" data-page-node-id="1IJpTKx1UmxHvXavrpl2Ep">
+          <div class="mrow next overdue" data-page-node-id="UXV6WJ5uH8tEUILAHreMD3">
+            <div class="mline" data-page-node-id="U6lL87pAwwSO5TM3Q8xIo8">
+              <div class="bar pink" data-page-node-id="icQY5UyMSxeu3UlC9T09Dj"></div><div class="gap7" data-page-node-id="wu8e1cGkkKUHvpv4rpE88m"></div>
+              <svg class="ico" viewBox="0 0 24 24" data-page-node-id="3RiLDhLFnFSkbM3cAFrnf0"><path d="M17 12h5" data-page-node-id="l1zojYFbx0DFXnvfqBcqiR"/><path d="M6.4 7.5h9.2a1.4 1.4 0 0 1 1.4 1.4v6.2a1.4 1.4 0 0 1-1.4 1.4H6.4A1.4 1.4 0 0 1 5 15.1V8.9a1.4 1.4 0 0 1 1.4-1.4Z" data-page-node-id="ilF33Bz9rSmymegmzGFiLx"/><path d="M8.8 7.5v3.1" data-page-node-id="FNg2djnwK6ld9a8pzunBFJ"/><path d="M12 7.5v3.1" data-page-node-id="3wYBCuD0R4KvM058ZQMJ3p"/><path d="M5 12H2.2" data-page-node-id="mL1YU5GEOewoRJtX0BcHEo"/><path d="M2.2 9.2v5.6" data-page-node-id="4Bp2fzicDyGOCinr8VYxFi"/></svg>
+              <div class="gap5" data-page-node-id="tnxbU11IIADSftczDsCoaA"></div><div class="dot pink" data-page-node-id="rebUrjz1zOjGxIBDYPRUeW"></div><div class="gap7" data-page-node-id="6bTDTKg9hTSAsjejf43qGF"></div>
+              <div class="mid" data-page-node-id="WaxfZagneucPyXRtjiJub1">
+                <div class="mname" data-page-node-id="LmvErOzjceYs5UbRhFdNFo">黄体酮注射液</div>
+                <div class="mstock" data-page-node-id="xDObX0UNxeQKdXRahrbGkP">库存不足 0 次</div>
+              </div>
+              <div class="mtime pink" data-page-node-id="N5JdxMNHyBG10HNOTREDHe">已超 9 小时</div>
+            </div>
+            <div class="pbar" data-page-node-id="7wYSVLtN0OD6uAPDj7mHLK"><i style="width:22%;background:var(--amber)" data-page-node-id="gqll67fJpO8IKq0GXBfQg0"></i></div>
+          </div>
+          <div class="mrow" data-page-node-id="X1GaHCWtrZTglEsqHjGvI2">
+            <div class="mline" data-page-node-id="uJ5pVGMJSUCANtE4yo0f0T">
+              <div class="bar" data-page-node-id="EqftoSVEaCskuGmWiZGYXg"></div><div class="gap7" data-page-node-id="hcR7rxg1u4E5wC19XDOpEC"></div>
+              <svg class="ico" viewBox="0 0 24 24" data-page-node-id="GZtJxF4XinkGdP0SEQobG5"><path d="M17 12h5" data-page-node-id="54KkxFzNYbaKqbabJ8N7gH"/><path d="M6.4 7.5h9.2a1.4 1.4 0 0 1 1.4 1.4v6.2a1.4 1.4 0 0 1-1.4 1.4H6.4A1.4 1.4 0 0 1 5 15.1V8.9a1.4 1.4 0 0 1 1.4-1.4Z" data-page-node-id="3IXbTfCRSHp1HswsB1l6oE"/><path d="M8.8 7.5v3.1" data-page-node-id="8wRrX8xa6PMml64jM4ES0g"/><path d="M12 7.5v3.1" data-page-node-id="1fFPixVywlyRDZ9P8rnxlN"/><path d="M5 12H2.2" data-page-node-id="deVDatFEc0b0BfgJxLagTQ"/><path d="M2.2 9.2v5.6" data-page-node-id="yZZLiIroMSbpcSssZU3CSa"/></svg>
+              <div class="gap5" data-page-node-id="t1kaXKQ2glcv5Sphhr4Thj"></div><div class="dot pink" data-page-node-id="PcpAlSpEaG7Qa3sYkPJDTS"></div><div class="gap7" data-page-node-id="3dSlQUVRv7bY1YG339Uw1w"></div>
+              <div class="mid" data-page-node-id="pbm6cJn5jyVqLaopgFvqkE">
+                <div class="mname" data-page-node-id="XRLScbCJtclGuLGGhZTGZk">戊酸雌二醇</div>
+                <div class="mstock" data-page-node-id="uLeUGF0eFEg6biEGoECbll">剩 4 次</div>
+              </div>
+              <div class="mtime pink" data-page-node-id="ljZyNlZ63bvv58Iv31YCkZ">已超 3 小时</div>
+            </div>
+            <div class="pbar" data-page-node-id="ClkIsYfhIumVm1v0ybykoo"><i style="width:52%;background:var(--pink)" data-page-node-id="c5DDDGB2ZMp82PTl8gEGEL"></i></div>
+          </div>
+          <div class="mrow" data-page-node-id="mvN1ClG48YnLP5yYMmPlbo">
+            <div class="mline" data-page-node-id="19qRzu47bre7HBRP1ArLMS">
+              <div class="bar" data-page-node-id="KNak3TSnzSVlhTsWY9Nf5q"></div><div class="gap7" data-page-node-id="TdzMS95hNCRzujPFouZBe5"></div>
+              <svg class="ico" viewBox="0 0 24 24" data-page-node-id="maKY7aofnJdss6jGXT8uIu"><path d="M17 12h5" data-page-node-id="obIzA7iiC1XiNNPHMtxYF8"/><path d="M6.4 7.5h9.2a1.4 1.4 0 0 1 1.4 1.4v6.2a1.4 1.4 0 0 1-1.4 1.4H6.4A1.4 1.4 0 0 1 5 15.1V8.9a1.4 1.4 0 0 1 1.4-1.4Z" data-page-node-id="vHHuMEoSODgSXVHtxcLdZg"/><path d="M8.8 7.5v3.1" data-page-node-id="PWZqR9Am0iGovBgXQXRlZf"/><path d="M12 7.5v3.1" data-page-node-id="QDXsTss84jfdbB8PFjdN2P"/><path d="M5 12H2.2" data-page-node-id="Ed8x6E6iNmxM0BkKs8MhB7"/><path d="M2.2 9.2v5.6" data-page-node-id="npOwhHlN2fzoRR6OePgdw8"/></svg>
+              <div class="gap5" data-page-node-id="C2JANOKXqS5nkZYndUSve2"></div><div class="dot cyan" data-page-node-id="XkSMZHEiQnE6mBYI09S9Ze"></div><div class="gap7" data-page-node-id="DuVoDu05zVBpTPheAd6ACO"></div>
+              <div class="mid" data-page-node-id="MgrMy9sCA8FXoBpDASjKc8">
+                <div class="mname" data-page-node-id="O3hMdtMq6idpVP62LmcJH7">螺内酯</div>
+                <div class="mstock" data-page-node-id="PehE0meTNDXXDKYLIK9jRX">剩 21 次</div>
+              </div>
+              <div class="mtime cyan" data-page-node-id="UC4EqGHGE3M5mKvBmS1Um5">1天20小时</div>
+            </div>
+            <div class="pbar" data-page-node-id="XZDhRR1NSs6JLpDrvp0W94"><i style="width:68%;background:var(--cyan)" data-page-node-id="C8umnFbxJgm6FpNJIb00Cw"></i></div>
+          </div>
+        </div>
+        <div class="week" data-page-node-id="BeYFQDnSVSNA1XDBA61XMC">
+          <hr data-page-node-id="lBH93jmBAnfyg5UdU6ODC6">
+          <div class="wline" data-page-node-id="vFr0dPUGxEWFZjom2AD8lE">
+            <div class="wlabel" data-page-node-id="K5BDvjk7MgMPAEax8KCrDE">近 7 天</div>
+            <div class="wdots" data-page-node-id="1sedUcb36VCIHZOfn9cY6l">
+              <div class="wd off" data-page-node-id="5DhbkjZzr9l1LqAh58OiZF"></div><div class="wd" data-page-node-id="mK1v8Tedc0cW8RDu8cWZZy"></div><div class="wd" data-page-node-id="xPKhPzfpNiDehFdebpFDHx"></div>
+              <div class="wd off" data-page-node-id="ijq1TOYT2gxjiOslt4wxWE"></div><div class="wd" data-page-node-id="Eo6j5CvtFZk6DxogQn49Kc"></div><div class="wd" data-page-node-id="1fYw9BNUZbvhFBcGnzIdyR"></div><div class="wd" data-page-node-id="08iWaAv7HGF7g4R9HyjbKb"></div>
+            </div>
+            <div class="wcount" data-page-node-id="oEpAg1ewhJ0VYqonSeXKGg">5/7</div>
+          </div>
+        </div>
+      </div>
+      <div class="cap" data-page-node-id="n0M17HSTuOPD2ClSZFOpB4">3×4 · 已超+缺货（高亮=下一剂）/ 已超+库存足 / 待服+库存足</div>
+    </div>
+  </div>
+</div>
+
+<div class="group" data-page-node-id="anNyBbrAGQ7vhYr0qunmCx">
+  <div class="glabel" data-page-node-id="tD0l9deWxCKPk1DyTRAMHF">2×2 下一剂 · 环形（待服青 / 已超粉）</div>
+  <div class="row" id="smallRow" data-page-node-id="oqUC4LeZ56Sr5NcTciODnO"></div>
+</div>
+
+<script>
+const states = [
+  {k:'waiting',  label:'待服 + 库存足',  name:'螺内酯',     crit:false, num:'4', unit:'小时', st:'待服', p:0.33},
+  {k:'waitingc', label:'待服 + 缺货',    name:'黄体酮注射液',crit:true,  num:'4', unit:'小时', st:'待服', p:0.33},
+  {k:'overdue',  label:'已超 + 库存足',  name:'戊酸雌二醇', crit:false, num:'9', unit:'小时', st:'已超', p:1},
+  {k:'overduec', label:'已超 + 缺货',    name:'黄体酮注射液',crit:true,  num:'9', unit:'小时', st:'已超', p:1},
+];
+
+function ring(progress, overdue){
+  const D = 96, r = 40, C = 2*Math.PI*r, on = C*progress;
+  const color = overdue ? 'var(--pink)' : 'var(--cyan)';
+  return `<svg viewBox="0 0 ${D} ${D}" width="${D}" height="${D}">
+    <circle cx="${D/2}" cy="${D/2}" r="${r}" fill="none"
+            stroke="var(--track)" stroke-width="8.2"/>
+    ${progress > 0 ? `<circle cx="${D/2}" cy="${D/2}" r="${r}" fill="none"
+            stroke="${color}" stroke-width="8.2" stroke-linecap="round"
+            stroke-dasharray="${on} ${C}" transform="rotate(-90 ${D/2} ${D/2})"/>` : ''}
+  </svg>`;
+}
+
+function render(){
+  document.getElementById('smallRow').innerHTML = states.map(s=>{
+    const overdue = s.k.startsWith('overdue');
+    return `<div class="cell">
+      <div class="small">
+        <div class="shead">
+          <svg class="ico" viewBox="0 0 24 24"><path d="M17 12h5"/><path d="M6.4 7.5h9.2a1.4 1.4 0 0 1 1.4 1.4v6.2a1.4 1.4 0 0 1-1.4 1.4H6.4A1.4 1.4 0 0 1 5 15.1V8.9a1.4 1.4 0 0 1 1.4-1.4Z"/><path d="M8.8 7.5v3.1"/><path d="M12 7.5v3.1"/><path d="M5 12H2.2"/><path d="M2.2 9.2v5.6"/></svg>
+          <div class="sname">${s.name}</div>
+          ${s.crit ? '<div class="scrit">库存不足</div>' : ''}
+        </div>
+        <div class="sbody">
+          <div class="ringwrap">
+            ${ring(s.p, overdue)}
+            <div class="rcenter">
+              <div class="rnum" style="color:${overdue?'var(--pink)':'var(--cyan)'}">${s.num}</div>
+              <div class="runit">${s.unit}</div>
+            </div>
+          </div>
+          <div class="sstate" style="color:${overdue?'var(--pink)':'var(--cyan)'}">${s.st}</div>
+        </div>
+        <div class="sbtn">记 ${s.name}</div>
+      </div>
+      <div class="cap">${s.label}</div>
+    </div>`;
+  }).join('');
+}
+render();
+
+const bL = document.getElementById('tLight'), bD = document.getElementById('tDark');
+bL.onclick = ()=>{document.body.classList.remove('dark');bL.classList.add('on');bD.classList.remove('on')};
+bD.onclick = ()=>{document.body.classList.add('dark');bD.classList.add('on');bL.classList.remove('on')};
+</script>
+</body>
+</html>

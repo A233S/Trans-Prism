@@ -1,9 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'meds_widget_service.dart';
+
 /// 主题模式偏好管理
 ///
 /// 将用户的亮/暗/系统跟随主题选择持久化到 SharedPreferences。
+///
+/// 这份偏好同时是**桌面用药小组件的唯一深浅色来源**：
+/// 原生侧 `MedsWidgetThemePrefs` 直读同一个 key（`flutter.theme_mode`），
+/// 所以每次变更都要通知原生重渲染卡片，否则小组件会停在旧的一套 token 上。
 class ThemeService extends ChangeNotifier {
   static const String _prefsKey = 'theme_mode';
   static const String _colorPrefsKey = 'theme_color';
@@ -49,12 +55,17 @@ class ThemeService extends ChangeNotifier {
   }
 
   /// 设置主题模式并持久化
+  ///
+  /// 持久化完成后立即请求刷新桌面用药小组件 —— 小组件的 ColorProvider 绑定的
+  /// 就是这份偏好（light / dark / system），不刷新就会与 App 内首页脱节。
   Future<void> setThemeMode(ThemeMode mode) async {
     _themeMode = mode;
     notifyListeners();
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefsKey, _themeModeToString(mode));
+
+    await MedsWidgetService.refresh();
   }
 
   /// 设置主题色并持久化

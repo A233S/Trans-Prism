@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-page-node-id="Jyf9ijhV9YhZXtKpBFzAEw">
+<head data-page-node-id="C2OU4wzx7jHQyLhYnCDvHr">
+<meta charset="utf-8" data-page-node-id="yQbQmEQasKUxYT96HndJYD">
+<title>Trans Prism 用药小组件 · v3 设计对照稿</title>
+<style>
+  :root{
+    --card:#FFFFFF; --title:#1A1A1A; --muted:#8A8580;
+    --pink:#E8899A; --cyan:#4AB8C8; --amber:#D4A017;
+    --track:#EDE8E4; --hairline:#EFE7E1; --onpink:#FFFFFF;
+    --row-hl:#0A000000;                    /* v3：中性极轻提亮（浅色 4% 黑） */
+    --page:#F4F1EE; --page-fg:#333;
+  }
+  body.dark{
+    --card:#211C1A; --title:#F3EEEA; --muted:#A39A94;
+    --pink:#F0A3B0; --cyan:#6BC9D4; --amber:#E0B84A;
+    --track:#3A322E; --hairline:#3A322E; --onpink:#211C1A;
+    --row-hl:#14FFFFFF;                    /* v3：深色 8% 白 */
+    --page:#0E0C0B; --page-fg:#EDE9E5;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:var(--page); color:var(--page-fg);
+    font-family:-apple-system,"PingFang SC","Noto Sans CJK SC",system-ui,sans-serif;
+    padding:32px 24px 64px; transition:background .2s,color .2s;
+  }
+  h1{font-size:20px;font-weight:800;margin-bottom:6px}
+  .sub{font-size:13px;color:var(--muted);line-height:1.75;margin-bottom:20px}
+  .sub code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+  .bar{display:flex;gap:10px;align-items:center;margin-bottom:28px;flex-wrap:wrap}
+  button{
+    font:inherit;font-size:13px;font-weight:600;padding:8px 16px;border-radius:999px;
+    border:1px solid var(--hairline);background:var(--card);color:var(--title);cursor:pointer;
+  }
+  button.on{background:var(--pink);color:var(--onpink);border-color:transparent}
+  .group{margin-bottom:40px}
+  .glabel{font-size:12px;font-weight:700;letter-spacing:.06em;color:var(--muted);
+    text-transform:uppercase;margin-bottom:14px}
+  .row{display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start}
+  .cell{display:flex;flex-direction:column;gap:8px}
+  .cap{font-size:11.5px;color:var(--muted);text-align:center;max-width:200px;line-height:1.5}
+
+  /* ─────────── 3×4 中卡 ─────────── */
+  .medium{
+    width:250px;height:180px;background:var(--card);border-radius:24px;
+    padding:14px 20px 12px;display:flex;flex-direction:column;
+    box-shadow:0 1px 2px rgba(60,40,30,.04);
+  }
+  .mhead{display:flex;align-items:center;justify-content:space-between;flex:0 0 auto}
+  .mtitle{font-size:13px;font-weight:500;color:var(--title)}
+  /* v3：右上角是 muted 小字说明，不是按钮 */
+  .mhint{font-size:10.5px;color:var(--muted);white-space:nowrap}
+  .rows{flex:1 1 auto;display:flex;flex-direction:column;justify-content:center;
+    padding-top:8px;min-height:0}
+  .mrow{border-radius:10px;padding:4px 8px;display:flex;flex-direction:column}
+  /* v3：只有「下一剂」行有极轻中性提亮，且不再是品牌色大底 */
+  .mrow.next{background:var(--row-hl)}
+  .mrow + .mrow{margin-top:5px}   /* v3：固定 5dp，不再均分富余 */
+  .mline{display:flex;align-items:center;width:100%}
+  .bar{width:3.5px;height:30px;border-radius:2px;background:transparent;flex:0 0 auto}
+  .bar.cyan{background:var(--cyan)} .bar.pink{background:var(--pink)}
+  .gap8{width:8px;flex:0 0 auto} .gap5{width:5px;flex:0 0 auto}
+  .ico{width:15px;height:15px;flex:0 0 auto;stroke:var(--muted);fill:none;
+    stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+  .dot{width:6px;height:6px;border-radius:50%;flex:0 0 auto}
+  .dot.cyan{background:var(--cyan)} .dot.pink{background:var(--pink)}
+  .mid{flex:1 1 auto;min-width:0;display:flex;flex-direction:column}
+  .mname{font-size:13px;font-weight:500;color:var(--title);white-space:nowrap;overflow:hidden}
+  .mstock{font-size:10.5px;color:var(--muted);white-space:nowrap;overflow:hidden}
+  .mtime{width:74px;flex:0 0 auto;text-align:right;font-size:12.5px;font-weight:500;
+    font-variant-numeric:tabular-nums}
+  .mtime.cyan{color:var(--cyan)} .mtime.pink{color:var(--pink)}
+  .pbar{margin:3px 0 0 45.5px;height:2px;border-radius:1px;background:var(--track);
+    position:relative;overflow:hidden}
+  .pbar i{position:absolute;left:0;top:0;bottom:0;border-radius:1px}
+  .week{flex:0 0 auto}
+  .week hr{border:0;border-top:1px solid var(--hairline);margin:5px 0}
+  .wline{display:flex;align-items:center;gap:0}
+  .wlabel{font-size:10.5px;font-weight:500;color:var(--muted);margin-right:10px}
+  .wdots{display:flex;align-items:center;gap:6px}
+  .wd{width:7px;height:7px;border-radius:50%;background:var(--pink)}
+  .wd.off{background:transparent;border:1px solid var(--track)}
+  .wcount{margin-left:auto;font-size:11px;font-weight:500;color:var(--title)}
+
+  /* ─────────── 2×2 小卡 ─────────── */
+  .small{
+    width:150px;height:150px;background:var(--card);border-radius:24px;
+    padding:12px 12px 13px;display:flex;flex-direction:column;
+    box-shadow:0 1px 2px rgba(60,40,30,.04);
+  }
+  .shead{display:flex;align-items:center;gap:5px;flex:0 0 auto}
+  .sname{font-size:11.5px;font-weight:500;color:var(--title);white-space:nowrap;
+    overflow:hidden;flex:1 1 auto;min-width:0}
+  .scrit{font-size:9.5px;font-weight:500;color:var(--amber);white-space:nowrap;flex:0 0 auto}
+  .sbody{flex:1 1 auto;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;min-height:0}
+  .ringwrap{position:relative;display:flex;align-items:center;justify-content:center;
+    flex:1 1 auto;min-height:0;width:100%}
+  .ringwrap svg{max-width:100%;max-height:100%}
+  .rcenter{position:absolute;inset:0;display:flex;flex-direction:column;
+    align-items:center;justify-content:center}
+  .rnum{font-size:26px;font-weight:700;line-height:1}
+  .runit{font-size:9.5px;font-weight:500;color:var(--muted);line-height:1.35}
+  .sstate{font-size:10.5px;font-weight:500;margin-top:2px}
+  .sbtn{margin-top:4px;flex:0 0 auto;height:30px;border-radius:15px;background:var(--pink);
+    color:var(--onpink);font-size:11.5px;font-weight:700;display:flex;
+    align-items:center;justify-content:center}
+</style>
+</head>
+<body data-page-node-id="Q33kpxfBjjHMtgVWy3CXjD">
+
+<h1 data-page-node-id="QlgRKVAdbPMSXqJCUnqbWQ">Trans Prism 用药小组件 · v3 设计对照稿</h1>
+<p class="sub" data-page-node-id="nhLFLfvGM7HRqgjqA0JEqD">
+  与实装同源：色值 / 尺寸 / 字号逐项取自 <code data-page-node-id="GFIbCHvcAlaVYOHyJCv6Hz">MedsWidgetTokens.kt</code>，
+  布局对应 <code data-page-node-id="fy9FEoMuNhjDGtHP62iyY6">MediumMedsWidget.kt</code> / <code data-page-node-id="Y9KjFYBzLqs4EELTGTqZg5">SmallMedsWidget.kt</code>。<br data-page-node-id="94Z6SjKGmGg6ykS0egPnsl">
+  <b data-page-node-id="17zr9BPRxSy6HA89YA9ZP7">v3 关键差异</b>：右上角是 muted 说明文字（不再是粉胶囊）；「下一剂」行改为
+  <b data-page-node-id="TrYTJXXHu3HTgsCkfPdkdL">3.5px 状态色竖条 + 中性极轻提亮</b>（不再是品牌色大底）；三行间距固定 5px；<br data-page-node-id="14nILIYbiT2AzMP3TEFdoO">
+  2×2 环线宽 6.2%（更细）、按钮底部留白 13px。<b data-page-node-id="10KktpqVPGG9sFsClEUq0S">点任意行 / 环 / 按钮都只打开 App 内的
+  「记录用药」Sheet，不直接打卡。</b><br data-page-node-id="M7GPJBBvGQRH3sfWEJZ5Gu">
+  环口径：<code data-page-node-id="WHg9YsVCNQSKsbMaWqSZbf">progress = 1 − 距下次剂量剩余分钟 / 给药间隔分钟</code>（已超 = 整圈）。
+</p>
+
+<div class="bar" data-page-node-id="Fa4jWwLdBF9wlRneVIcQ2M">
+  <button id="tLight" class="on" data-page-node-id="k3ttGlvCVyZi4JBpCKU8HV">浅色 token</button>
+  <button id="tDark" data-page-node-id="QwrYBiSpwxOEm8C2Ek5KNs">深色 token</button>
+  <span style="font-size:12px;color:var(--muted)" data-page-node-id="lqUMZsL4NnunCS3nsYjumE">
+    深浅色由 App 主题偏好决定（不跟壁纸、不跟系统，除非 App 设为「跟随系统」）
+  </span>
+</div>
+
+<div class="group" data-page-node-id="wOnqDSKxJ4OPHfGBChHzox">
+  <div class="glabel" data-page-node-id="tBJRb8vt5jyj8ucRvJvVsx">3×4 一览 · 下一剂左竖条 + 整行可点 + 右上说明文字</div>
+  <div class="row" data-page-node-id="0Y33mHXbWMBiSaKDdumCC9">
+    <div class="cell" data-page-node-id="ox0sovGZeYewfP4yBDTEqW">
+      <div class="medium" data-page-node-id="HhUmaN1H2C8fJhIsTnCCNo">
+        <div class="mhead" data-page-node-id="8f13lndoyco5j9SuklkEEG">
+          <div class="mtitle" data-page-node-id="q0ifR90I147piudFGfilCq">今日 4/4</div>
+          <div class="mhint" data-page-node-id="b1ap2A89yIk6ro86rrcxsP">点对应药物服药</div>
+        </div>
+        <div class="rows" data-page-node-id="BsKC426uWr7ryAdkFhgmWE">
+          <div class="mrow next" data-page-node-id="4pZgYiBIBPxU2oBwhDP0mr">
+            <div class="mline" data-page-node-id="g3F2u7IaPnM1ElJ2vv83GT">
+              <div class="bar cyan" data-page-node-id="RMWACxpi3OiXYHkIFpkZZW"></div><div class="gap8" data-page-node-id="C9g69O7HWVaj7aQxqPlJBI"></div>
+              <svg class="ico" viewBox="0 0 24 24" data-page-node-id="UQoKc9ZUj4pCkk3WF8lsdr"><path d="M17 12h5" data-page-node-id="T90LNBWCRypPlTcSvCWRgT"/><path d="M6.4 7.5h9.2a1.4 1.4 0 0 1 1.4 1.4v6.2a1.4 1.4 0 0 1-1.4 1.4H6.4A1.4 1.4 0 0 1 5 15.1V8.9a1.4 1.4 0 0 1 1.4-1.4Z" data-page-node-id="NZvFveFrctyGcRo4sF3fkB"/><path d="M8.8 7.5v3.1" data-page-node-id="y0T3hnQbLUxrsWEefj5ukq"/><path d="M12 7.5v3.1" data-page-node-id="c5JgYc3c6M0ustJnAUQWG0"/><path d="M5 12H2.2" data-page-node-id="iluqXMydVBMB5K5cGedtyA"/><path d="M2.2 9.2v5.6" data-page-node-id="28fDza3rQEis4Q9F8nkiYo"/></svg>
+              <div class="gap5" data-page-node-id="gYTylvjG2co2xlvkJlSidS"></div><div class="dot cyan" data-page-node-id="aEz63uqTqhOY1hEBiKXOML"></div><div class="gap8" data-page-node-id="SqROF1A0jVyM4EISZTkTYh"></div>
+              <div class="mid" data-page-node-id="ywvaDj0jXMfu1RsEqddONc">
+                <div class="mname" data-page-node-id="wnAWQuTiureWOZR6JGST6n">螺内酯</div>
+                <div class="mstock" data-page-node-id="y4kTMqFFVv0B9WBc278TcY">剩 11 次</div>
+              </div>
+              <div class="mtime cyan" data-page-node-id="gcEbSv3FKGnuWo4jnSdKZW">1 小时</div>
+            </div>
+            <div class="pbar" data-page-node-id="cbjiS7VDyYWHzyKn19SRJc"><i style="width:37%;background:var(--cyan)" data-page-node-id="vntsRwX0XBRyperh0Sy1JI"></i></div>
+          </div>
+          <div class="mrow" data-page-node-id="pepI8HvsHsfkkDbLoNRE88">
+            <div class="mline" data-page-node-id="kdb0nJRJBQtuPYaEIgdfll">
+              <div class="bar" data-page-node-id="pyKaF7n3Prsj8tb2StbY9x"></div><div class="gap8" data-page-node-id="PpQSowEbhEyHWqPe9wYtk2"></div>
+              <svg class="ico" viewBox="0 0 24 24" data-page-node-id="CUl8JDeOXKkninthyBckas"><path d="M17 12h5" data-page-node-id="uNnFTYUzBiYFy5sKj37oKJ"/><path d="M6.4 7.5h9.2a1.4 1.4 0 0 1 1.4 1.4v6.2a1.4 1.4 0 0 1-1.4 1.4H6.4A1.4 1.4 0 0 1 5 15.1V8.9a1.4 1.4 0 0 1 1.4-1.4Z" data-page-node-id="mudGy8YXBwBwIVRgZdonUS"/><path d="M8.8 7.5v3.1" data-page-node-id="OAeDAcfVsKmf1LMqkcBu6D"/><path d="M12 7.5v3.1" data-page-node-id="ryVJnUrCS1JKMgXiG1R6t6"/><path d="M5 12H2.2" data-page-node-id="MZCOy6rVbhzEmQcCswV464"/><path d="M2.2 9.2v5.6" data-page-node-id="gikeeSZCeIETpAn0kdvA6E"/></svg>
+              <div class="gap5" data-page-node-id="QBV7b2cTjy2LwOCSsUddjI"></div><div class="dot cyan" data-page-node-id="OjDp8aHU3uDiiMhA443fc2"></div><div class="gap8" data-page-node-id="6KJVCWW4ns2PqFgeplhIkF"></div>
+              <div class="mid" data-page-node-id="zw6rAGEyQDDCmesthFbbaa">
+                <div class="mname" data-page-node-id="6vq6RzFfhdo1K9BGFm1dBU">戊酸雌二醇</div>
+                <div class="mstock" data-page-node-id="yzRiLReoykMHD2QGIpo2UL">剩 11 次</div>
+              </div>
+              <div class="mtime cyan" data-page-node-id="ZCgSadAMrtoEZR1yKUbkTr">6天23小时</div>
+            </div>
+            <div class="pbar" data-page-node-id="WkaUsQEYX2SGHhJed5ooBG"><i style="width:37%;background:var(--cyan)" data-page-node-id="vLjSdUFmae72ZWQCJsvFiX"></i></div>
+          </div>
+          <div class="mrow" data-page-node-id="H2yF5X6NAd2CuQsLgX0fGe">
+            <div class="mline" data-page-node-id="s2v13BjICwoQMj8XkQZjVR">
+              <div class="bar" data-page-node-id="lcFA7I99Szz5GeKJg9a2YP"></div><div class="gap8" data-page-node-id="DspinVDvroJZnJrYJGu1jf"></div>
+              <svg class="ico" viewBox="0 0 24 24" data-page-node-id="sHTcAXTJADiPXvlcrNkzGr"><path d="M17 12h5" data-page-node-id="afFJ5rC44azqyn0tCF4v8M"/><path d="M6.4 7.5h9.2a1.4 1.4 0 0 1 1.4 1.4v6.2a1.4 1.4 0 0 1-1.4 1.4H6.4A1.4 1.4 0 0 1 5 15.1V8.9a1.4 1.4 0 0 1 1.4-1.4Z" data-page-node-id="mwiCxWb0yWN8c56i3GZhcD"/><path d="M8.8 7.5v3.1" data-page-node-id="BXLP1CISVH5BMqdNShLVIY"/><path d="M12 7.5v3.1" data-page-node-id="80B56rPC8pDn6AvZvAtgmZ"/><path d="M5 12H2.2" data-page-node-id="7CtZN7s3DJJPyy0o2nxB8K"/><path d="M2.2 9.2v5.6" data-page-node-id="oU20HOPE9BrD6u4JJ9dWqJ"/></svg>
+              <div class="gap5" data-page-node-id="7CxzTZlHjDmS2wIhvDOvI3"></div><div class="dot cyan" data-page-node-id="Y2a5VZtM9EWQGbY3AnCf1H"></div><div class="gap8" data-page-node-id="O0Om8AwtjHtLVLO21SEPxw"></div>
+              <div class="mid" data-page-node-id="gCXRTLvrEHpdtiEQeoIrXy">
+                <div class="mname" data-page-node-id="gwzJOZJkgTYq6VMLj65dLU">黄体酮注射液</div>
+                <div class="mstock" data-page-node-id="LamuG01IG6RecWBE4EESvd">库存不足 0 次</div>
+              </div>
+              <div class="mtime cyan" data-page-node-id="8gbEnOWaCJaHbXxgFqCuce">13天23小时</div>
+            </div>
+            <div class="pbar" data-page-node-id="OZzxBRN3NDSKDhXns0ZZ0p"><i style="width:22%;background:var(--amber)" data-page-node-id="dxzSZitgr8mTeFXvV2QDKm"></i></div>
+          </div>
+        </div>
+        <div class="week" data-page-node-id="HylbjrVq0P1BRNNgV6zTQ5">
+          <hr data-page-node-id="zS0WOgkGoa8pZdSXUPZCTV">
+          <div class="wline" data-page-node-id="Kn5PeH7acIDU9vF6H3RMeE">
+            <div class="wlabel" data-page-node-id="HCl6yHWtYDXsYSlD8si6eP">近 7 天</div>
+            <div class="wdots" data-page-node-id="x5Ewv4rGqYaeNCCOVrm8uR">
+              <div class="wd" data-page-node-id="Q5fJmnBkDfMwGz3RWec0XF"></div><div class="wd off" data-page-node-id="8CygTiaMAF62qLx4gDQm5Z"></div><div class="wd" data-page-node-id="j0i1enCo8Wfzzcge8DQWhv"></div>
+              <div class="wd" data-page-node-id="Cpwbc3ml4AlYOkTufhqRbD"></div><div class="wd" data-page-node-id="cFShpc7eFJnjq70OYCrHvZ"></div><div class="wd" data-page-node-id="wzzZlEQXGephkbEzriJJw2"></div><div class="wd" data-page-node-id="a7jUvukfHwHAfAFU8pFLxm"></div>
+            </div>
+            <div class="wcount" data-page-node-id="t8Sum6UEGxFp7QQYMfzQeP">6/7</div>
+          </div>
+        </div>
+      </div>
+      <div class="cap" data-page-node-id="Ruv88Kb3GnqjjLhGwbUL0F">3×4 · 三行都可点；只有第 1 行有左竖条 + 极轻提亮（表示「最近一剂」）</div>
+    </div>
+  </div>
+</div>
+
+<div class="group" data-page-node-id="fKnJ2vcwhs6dqxiegVgwEj">
+  <div class="glabel" data-page-node-id="GGPLdo9grEXlfF7xbxCb47">2×2 下一剂 · 环形（待服青 / 已超粉）</div>
+  <div class="row" id="smallRow" data-page-node-id="pBhNmircSGZ9a7qrcWjPs1"></div>
+</div>
+
+<script>
+const states = [
+  {label:'待服 + 库存足',  name:'螺内酯',      crit:false, num:'1', unit:'小时', st:'待服', p:0.87},
+  {label:'待服 + 缺货',    name:'黄体酮注射液', crit:true,  num:'1', unit:'小时', st:'待服', p:0.87},
+  {label:'已超 + 库存足',  name:'戊酸雌二醇',   crit:false, num:'9', unit:'小时', st:'已超', p:1},
+  {label:'已超 + 缺货',    name:'黄体酮注射液', crit:true,  num:'9', unit:'小时', st:'已超', p:1},
+];
+
+/* 与 MedsRingRenderer 同参数：线宽 = 边长 × 6.2%，环外再留 3.5% 边距 */
+function ring(progress, overdue){
+  const D = 96, stroke = D * 0.062, inset = stroke/2 + D * 0.035;
+  const r = D/2 - inset, C = 2*Math.PI*r, on = C*progress;
+  const color = overdue ? 'var(--pink)' : 'var(--cyan)';
+  return `<svg viewBox="0 0 ${D} ${D}" width="${D}" height="${D}">
+    <circle cx="${D/2}" cy="${D/2}" r="${r}" fill="none"
+            stroke="var(--track)" stroke-width="${stroke.toFixed(2)}"/>
+    ${progress > 0 ? `<circle cx="${D/2}" cy="${D/2}" r="${r}" fill="none"
+            stroke="${color}" stroke-width="${stroke.toFixed(2)}" stroke-linecap="round"
+            stroke-dasharray="${on} ${C}" transform="rotate(-90 ${D/2} ${D/2})"/>` : ''}
+  </svg>`;
+}
+
+const ICON = '<svg class="ico" viewBox="0 0 24 24"><path d="M17 12h5"/><path d="M6.4 7.5h9.2a1.4 1.4 0 0 1 1.4 1.4v6.2a1.4 1.4 0 0 1-1.4 1.4H6.4A1.4 1.4 0 0 1 5 15.1V8.9a1.4 1.4 0 0 1 1.4-1.4Z"/><path d="M8.8 7.5v3.1"/><path d="M12 7.5v3.1"/><path d="M5 12H2.2"/><path d="M2.2 9.2v5.6"/></svg>';
+
+document.getElementById('smallRow').innerHTML = states.map(s=>{
+  const overdue = s.st === '已超';
+  const accent = overdue ? 'var(--pink)' : 'var(--cyan)';
+  return `<div class="cell">
+    <div class="small">
+      <div class="shead">
+        ${ICON.replace('width:15px','width:13px')}
+        <div class="sname">${s.name}</div>
+        ${s.crit ? '<div class="scrit">库存不足</div>' : ''}
+      </div>
+      <div class="sbody">
+        <div class="ringwrap">
+          ${ring(s.p, overdue)}
+          <div class="rcenter">
+            <div class="rnum" style="color:${accent}">${s.num}</div>
+            <div class="runit">${s.unit}</div>
+          </div>
+        </div>
+        <div class="sstate" style="color:${accent}">${s.st}</div>
+      </div>
+      <div class="sbtn">记 ${s.name}</div>
+    </div>
+    <div class="cap">${s.label}</div>
+  </div>`;
+}).join('');
+
+const bL = document.getElementById('tLight'), bD = document.getElementById('tDark');
+bL.onclick = ()=>{document.body.classList.remove('dark');bL.classList.add('on');bD.classList.remove('on')};
+bD.onclick = ()=>{document.body.classList.add('dark');bD.classList.add('on');bL.classList.remove('on')};
+</script>
+</body>
+</html>

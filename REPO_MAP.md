@@ -17,10 +17,11 @@
 
 | 维度 | 方案 | 关键文件 |
 |------|------|----------|
-| **Flutter 版本** | Flutter 3.x / Dart >=3.4.0 | [`pubspec.yaml`](pubspec.yaml:8) |
+| **App 版本** | **v1.7.0** | [`pubspec.yaml`](pubspec.yaml:5) |
+| **Flutter 版本** | Flutter 3.x / Dart >=3.6.2 <4.0.0 | [`pubspec.yaml`](pubspec.yaml:8) |
 | **状态管理** | 原生 `StatefulWidget` + `setState`；仅 [`ThemeService`](lib/services/theme_service.dart:7) `extends ChangeNotifier` | 无第三方状态库 |
 | **本地存储** | `SharedPreferences`（JSON Key-Value） | [`pubspec.yaml`](pubspec.yaml:20) |
-| **路由** | 命令式 `Navigator.push`（无 go_router） | [`main.dart`](lib/main.dart:1257) |
+| **路由** | 命令式 `Navigator.push`（无 go_router） | [`main.dart`](lib/main.dart:1899) |
 | **网络** | `dio` + 自研 DoH 抗污染（R2 三路热更新 + GitHub API 全部走 `DnsSafeNetworkService`，标准 DNS 优先 + DoH 兜底） | [`dns_safe_network_service.dart`](lib/services/dns_safe_network_service.dart:11)（含 [`downloadBytes()`](lib/services/dns_safe_network_service.dart:71) + `instance` 单例） |
 | **Android 构建配置** | `compileSdk = 36`, `targetSdk = 36`, `ndkVersion = "28.2.13676358"` | [`android/app/build.gradle:28`](android/app/build.gradle:28) |
 
@@ -130,6 +131,54 @@
 | [`svg_resource_gallery_screen.dart`](lib/screens/svg_resource_gallery_screen.dart:1) | SVG 图库浏览 |
 | [`resource_service.dart`](lib/services/resource_service.dart:14) | SVG 资源元数据服务 |
 
+### 8. 桌面用药小组件（Android / Glance）
+
+| 文件 | 职责 |
+|------|------|
+| [`MedsWidgetData.kt`](android/app/src/main/kotlin/com/daanser/transprism/widget/MedsWidgetData.kt:1) | 展示模型 + **只读** Flutter SP（`drug_inventory_list` / `medication_logs`）+ 预览假数据 |
+| [`MedsWidgetTokens.kt`](android/app/src/main/kotlin/com/daanser/transprism/widget/MedsWidgetTokens.kt:1) | 语义 token（色 / 尺寸 / 字号）+ `MedsWidgetThemeProvider`（CompositionLocal 注入当前 token 集） |
+| [`MedsWidgetThemePrefs.kt`](android/app/src/main/kotlin/com/daanser/transprism/widget/MedsWidgetThemePrefs.kt:1) | **主题偏好解析**：`colorsFor()` 读 `flutter.theme_mode` 判定 light/dark/system（跟 App、不跟系统） |
+| [`MedsRingRenderer.kt`](android/app/src/main/kotlin/com/daanser/transprism/widget/MedsRingRenderer.kt:1) | 2×2 环形进度**预渲染位图**（Glance 无 Canvas）+ LruCache |
+| [`MedsWidgetCommon.kt`](android/app/src/main/kotlin/com/daanser/transprism/widget/MedsWidgetCommon.kt:1) | 共享原子组件（针筒图标、状态点、下一剂竖条、按钮、进度条） |
+| [`MediumMedsWidget.kt`](android/app/src/main/kotlin/com/daanser/transprism/widget/MediumMedsWidget.kt:1) | **3×4 中卡**：下一剂左竖条 + 整行可点（打开该药 Sheet）+ 右上 muted 说明「点对应药物服药」 |
+| [`SmallMedsWidget.kt`](android/app/src/main/kotlin/com/daanser/transprism/widget/SmallMedsWidget.kt:1) | **2×2 小卡**：下一剂环形 + 单按钮（两者都只打开该药 Sheet） |
+| [`MedsWidgetReceivers.kt`](android/app/src/main/kotlin/com/daanser/transprism/widget/MedsWidgetReceivers.kt:1) | 两个 Receiver + `MedsWidgetUpdater.refreshAll()`（Glance 1.2.0 无 `updateAll`，需枚举实例） |
+| [`MedsWidgetActions.kt`](android/app/src/main/kotlin/com/daanser/transprism/widget/MedsWidgetActions.kt:1) | 动作契约：`open_record_sheet`（带 `drugId`）+ `open_meds`；旧 `record_dose` 仅作兼容。`widgetClickAction()` 产出**广播** action（HyperOS 兼容，见下） |
+| [`MedsWidgetClickReceiver.kt`](android/app/src/main/kotlin/com/daanser/transprism/widget/MedsWidgetClickReceiver.kt:1) | **点击广播中转**（HyperOS 兼容核心）：`onReceive` → `startActivity(makeMainActivity(MainActivity))` |
+| [`meds_widget_service.dart`](lib/services/meds_widget_service.dart:1) | Dart 侧桥接：`refresh()` / `canPin()` / `pin(size)` |
+
+> **数据流（v1.7.0 起：小组件永不写入）**：小组件**只读** Flutter 的同一份
+> `SharedPreferences`（键前缀 `flutter.`），不新增任何存储、不复制打卡逻辑。
+> **点击链路（HyperOS 兼容，见 §11.6）**：小组件点击产出的是
+> `PendingIntent.getBroadcast`（Glance `actionSendBroadcast`）→
+> [`MedsWidgetClickReceiver`](android/app/src/main/kotlin/com/daanser/transprism/widget/MedsWidgetClickReceiver.kt:1)
+> 在自己的进程里 `startActivity(Intent.makeMainActivity(...))`。
+> **不要改回 `actionStartActivity`** —— HyperOS 会拦截「小组件 PendingIntent 直接启动
+> Activity」，症状是卡片显示正常但点击无反应。
+> 随后带 extra 唤起 `MainActivity` → MethodChannel
+> `com.daanser.transprism/widget_action` → Dart `_dispatchWidgetAction` →
+> `_openRecordSheetFromWidget()` → 复用既有
+> [`RecordDoseDialog.show()`](lib/widgets/record_dose_dialog.dart:27)。
+> **只有用户在 Sheet 里点「确认服药」**才走 `MedicationService.executeMedicationDose()`；
+> 取消 / 系统返回不改动任何数据。
+>
+> **主题**：卡片深浅色绑定 App「我的 → 主题模式」的偏好（`flutter.theme_mode`），
+> **不跟壁纸、不跟系统**（除非 App 设为「跟随系统」）。偏好变化 → `ThemeService`
+> → `MedsWidgetService.refresh()` 重渲染；`resumed` / `paused` 各补刷一次。
+>
+> ⚠️ **数据与主题必须在 `provideContent { }` 内读取** —— Glance 会话长驻，
+> `provideGlance` 只在会话创建时跑一次，提到外面的 `val` 会被闭包捕获而永不刷新。
+>
+> ⚠️ **每个点击目标的 data URI 必须唯一**：`PendingIntent` 去重依据是
+> `Intent.filterEquals`，它**忽略 extras**。若只用 extras 区分不同药的行，
+> 几行会被判成同一个 PendingIntent、`FLAG_UPDATE_CURRENT` 让最后一个覆盖全部
+> → 点哪行都开同一味药。故写入 `transprism://widget/{action}/{drugId}`。
+>
+> **「我的 → 外观与显示 → 添加到主屏幕」** 走 `AppWidgetManager.requestPinAppWidget`
+> （Android 8+），不支持的设备退化为长按桌面的文字说明。
+>
+> 完整实装说明与验收清单见 [`docs/WIDGET_IMPLEMENTATION.md`](docs/WIDGET_IMPLEMENTATION.md:1)。
+
 ---
 
 ## 入口与路由
@@ -137,13 +186,13 @@
 | 文件 | 职责 |
 |------|------|
 | [`main.dart`](lib/main.dart:1) | 应用入口：DevicePreview 包裹 → 主题构建 → RootController → MainDashboard（4 Tab 底部导航） |
-| [`main.dart:37`](lib/main.dart:37) | `main()`：`WidgetsFlutterBinding.ensureInitialized()` → `tz.initializeTimeZones()` → `runApp(DevicePreview(enabled: !kReleaseMode, builder: ...))` |
-| [`main.dart:386`](lib/main.dart:386) | `_TransToolboxAppState.build()`：`ListenableBuilder` + `ThemeService` + `MaterialApp`（含 `DevicePreview.locale()` / `DevicePreview.appBuilder`） |
-| [`main.dart:413`](lib/main.dart:413) | `AppRootController`：性别认同/免责路由编排 + 后台同步调度 |
-| [`main.dart:782`](lib/main.dart:782) | `MainDashboard`：`IndexedStack` 承载 4 个 Tab |
-| [`main.dart:1176`](lib/main.dart:1176) | `HomeTab`：首页模块容器（问候语 + HRT + 工具箱 + 声音训练），模块可见性由 SP 控制 |
-| [`main.dart:1893`](lib/main.dart:1893) | `ProfileTab`（我的）：身份与资料 / 外观与显示 / **高级**（通知权限与保活、数据导出与恢复、**血药浓度模拟端口**）/ **系统**（关于与支持、**相关链接**、**检查更新**、**再次进入向导**）。所有设置项经 [`_buildSettingsTile`](lib/main.dart:2270) 渲染且**统一无副标题**（`subtitle` 一律为 `null`）；端口设置弹层 [`_showTrackerPortSheet`](lib/main.dart:2964)（智能/自定义 + 修改确认，变更端口会改变 SPA origin，须先内置导出备份；配置**重启应用后生效**）；「再次进入向导」经 `Navigator.push` 重跑 `OnboardingWizard`，完成后 pop 回主界面 |
-| [`main.dart:1966`](lib/main.dart:1966) | `_handleCheckUpdate`：手动检查更新入口（SnackBar「正在检查更新…」→ `UpdateService.checkForUpdate()` → 新版本弹 `UpdateDialog`（含 `release_notes` 更新内容，源字段为 `latest.json` 的**可选** `release_notes`）/ 网络错误 / 已是最新 三态） |
+| [`main.dart:66`](lib/main.dart:66) | `main()`：`WidgetsFlutterBinding.ensureInitialized()` → `tz.initializeTimeZones()` → `runApp(DevicePreview(enabled: !kReleaseMode, builder: ...))` |
+| [`main.dart:679`](lib/main.dart:679) | `_TransToolboxAppState.build()`：`ListenableBuilder` + `ThemeService` + `MaterialApp`（含 `DevicePreview.locale()` / `DevicePreview.appBuilder`） |
+| [`main.dart:719`](lib/main.dart:719) | `AppRootController`：性别认同/免责路由编排 + 后台同步调度 |
+| [`main.dart:1285`](lib/main.dart:1285) | `MainDashboard`：`IndexedStack` 承载 4 个 Tab |
+| [`main.dart:1798`](lib/main.dart:1798) | `HomeTab`：首页模块容器（问候语 + HRT + 工具箱 + 声音训练），模块可见性由 SP 控制 |
+| [`main.dart:2120`](lib/main.dart:2120) | `ProfileTab`（我的）：身份与资料 / 外观与显示（主题模式、主题风格、主题色、**添加到主屏幕**） / **高级**（通知权限与保活、数据导出与恢复、**血药浓度模拟端口**）/ **系统**（关于与支持、**相关链接**、**检查更新**、**再次进入向导**）。所有设置项经 [`_buildSettingsTile`](lib/main.dart:2607) 渲染且**统一无副标题**（`subtitle` 一律为 `null`）；端口设置弹层 [`_showTrackerPortSheet`](lib/main.dart:3368)（智能/自定义 + 修改确认，变更端口会改变 SPA origin，须先内置导出备份；配置**重启应用后生效**）；「再次进入向导」经 `Navigator.push` 重跑 `OnboardingWizard`，完成后 pop 回主界面；「添加到主屏幕」弹层 [`_showAddToHomeSheet`](lib/main.dart:3784)（选尺寸 → 原生 `requestPinAppWidget`）|
+| [`main.dart:2197`](lib/main.dart:2197) | `_handleCheckUpdate`：手动检查更新入口（SnackBar「正在检查更新…」→ `UpdateService.checkForUpdate()` → 新版本弹 `UpdateDialog`（含 `release_notes` 更新内容，源字段为 `latest.json` 的**可选** `release_notes`）/ 网络错误 / 已是最新 三态） |
 | [`onboarding_wizard.dart`](lib/screens/onboarding/onboarding_wizard.dart:1) | `OnboardingWizard` 初始化引导：欢迎 → 权限 → 性别/主题/称呼 → **使用须知（免责声明，须勾选同意）** → 完成。**「跳过」仅跳转到使用须知步骤（接受默认选择，不自动同意免责）**——必须勾选同意后才能完成进入主界面。启动场景由 `AppRootController` 在 `onboarding_completed` 缺失时展示；「我的 → 系统 → 再次进入向导」可手动重跑（`onCompleted` 后 pop） |
 | [`links_screen.dart`](lib/screens/links_screen.dart:1) | `LinksScreen`（相关链接二级页）：「我的 → 系统 → 相关链接」进入，集中展示外部链接（官网 `transprism.chengxi.moe` / GitHub `github.com/Trans-Prism/Trans-Prism`），经 `url_launcher` `LaunchMode.externalApplication` 跳系统浏览器。纯静态 UI，App 内零网络请求、不经 R2 / `DnsSafeNetworkService`，无持久化 / 状态管理 / 新依赖；双模自适应（GlassSurface） |
 
@@ -166,7 +215,7 @@
 | [`glass_sheet.dart`](lib/widgets/glass_sheet.dart:1) | `GlassSheet`：玻璃 BottomSheet 容器 |
 | [`glass_dialog.dart`](lib/widgets/glass_dialog.dart:1) | `GlassDialog`：玻璃对话框容器 |
 | [`glass_pill.dart`](lib/widgets/glass_pill.dart:1) | `GlassPill`：玻璃胶囊/Chip（轻材质） |
-| [`main.dart`](lib/main.dart:530) | `_TransToolboxAppState.build()`：按 `themeStyle` 分支选择 `_buildLiquidXxxTheme`/`_buildXxxTheme`，注入 `GlassTheme`，并按 `accessibleNavigation` 触发无障碍降级 |
+| [`main.dart`](lib/main.dart:679) | `_TransToolboxAppState.build()`：按 `themeStyle` 分支选择 `_buildLiquidXxxTheme`/`_buildXxxTheme`，注入 `GlassTheme`，并按 `accessibleNavigation` 触发无障碍降级 |
 
 **设计原则**：组件库"双模自适应"——`GlassXxx` 在 minimal 模式下退化为与既有简约外观一致，业务页调用点改动极小即可在两风格间无缝切换。液态玻璃遵循 Apple WWDC *Designing Fluid Interfaces* §12 Materials & depth（半透明浮动层 + 顶部高光边 + 滚动边缘效果）与 §14 无障碍降级。
 
@@ -190,6 +239,7 @@
 | `SharedPreferences` JSON | Wiki 同步状态 | `wiki_sync_snapshots` |
 | `SharedPreferences` 直接 bool | 模块可见性 | `home_module_*` |
 | `SharedPreferences` 直接 string | 主题/称呼/前缀 | `user_greeting_name` |
+| `SharedPreferences` 直接 string | **主题模式（App 与桌面小组件共享的深浅色唯一来源）** | `theme_mode`（`light`/`dark`/`system`） |
 | `SharedPreferences` 直接 string/int | Tracker 端口模式/自定义端口 | `tracker_port_mode` / `tracker_custom_port` |
 | 文件系统 | 离线 Wiki/Tracker ZIP | `getApplicationDocumentsDirectory()` |
 

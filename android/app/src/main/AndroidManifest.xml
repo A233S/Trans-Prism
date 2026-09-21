@@ -19,6 +19,13 @@
     <!-- 用药提醒走 fullScreenIntent（AndroidNotificationDetails.fullScreenIntent=true）。
          Android 14+ (API 34+) 未声明该权限时，全屏通知会被系统静默降级为普通通知。 -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
+    <!-- 「显示在其他应用上层」（悬浮窗）。看似与用药无关，实为小组件点击能否打开 App 的关键：
+         Android 10+ 限制应用在「后台」启动 Activity（BAL），而**持有 SYSTEM_ALERT_WINDOW
+         的应用在 BAL 豁免名单内**。小组件点击正是「从后台启动 Activity」，
+         没有它就会出现「点小组件偶尔才能打开 App」。
+         国产 ROM 也把它当「后台弹出界面」的判据（OPPO 的检测即 Settings.canDrawOverlays）。
+         该权限需用户在系统设置里手动授予，App 内「我的 → 高级 → 通知权限与保活」有引导。 -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
     <!-- 提升 Android 14+ 后台存活率 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
@@ -28,11 +35,16 @@
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:enableOnBackInvokedCallback="true">
+        <!-- ⚠️ 不要给 MainActivity 加 android:taskAffinity=""（2026-09-21 移除）
+             历史上这里写过 taskAffinity=""，会让 MainActivity 的 task affinity 变成空串。
+             空 affinity + FLAG_ACTIVITY_NEW_TASK（小组件点击 / 通知 / 中转 Receiver 都用它）
+             属于未定义地带：系统可能每次都新建一个 task，而不是把已有的 app task 拉回前台。
+             在小米澎湃 OS 上表现为「点小组件偶尔才能打开 App」。
+             移除后 affinity 回落到默认值（包名），launch 行为与「点桌面图标」完全一致。 -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
-            android:taskAffinity=""
             android:theme="@style/LaunchTheme"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
@@ -108,6 +120,26 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/meds_widget_medium_info" />
         </receiver>
+        <!-- ─── 小组件点击的广播中转（HyperOS / 澎湃 OS 兼容）─────────────
+             小组件点击不直接 PendingIntent.getActivity → MainActivity，
+             而是 PendingIntent.getBroadcast → 本 Receiver → startActivity()。
+             原因：HyperOS 会拦截「小组件 PendingIntent 直接启动 Activity」，
+             表现是卡片显示正常但点击无反应；而应用自己进程里发起的
+             startActivity()（Receiver 被唤醒时持有短暂的后台启动豁免）不受此限制。
+             参考同级项目 calendar_countdown_widget 的 HyperOS 踩坑记录。
+
+             android:exported 必须为 true：参考项目记录「中转组件若设为
+             exported=false，也可能被 HyperOS 拦截」（即使 PendingIntent
+             理论上不受 exported 限制）。onReceive 里严格校验 action，
+             非本 action 一律忽略。 -->
+        <receiver
+            android:name=".widget.MedsWidgetClickReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.daanser.transprism.widget.action.CLICK" />
+            </intent-filter>
+        </receiver>
+
         <receiver
             android:name=".widget.SmallMedsWidgetReceiver"
             android:exported="true"

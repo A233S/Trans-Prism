@@ -121,6 +121,37 @@ class PermissionManager {
   }
 
   // ============================================================
+  //  5.5 「显示在其他应用上层」（SYSTEM_ALERT_WINDOW / 悬浮窗）
+  // ============================================================
+
+  /// 是否已授予「显示在其他应用上层」。
+  ///
+  /// ## 为什么用药 App 需要它
+  ///
+  /// Android 10+ 限制应用在**后台启动 Activity**（BAL）。而桌面小组件的点击本质就是
+  /// 「从后台启动 Activity」—— 没有豁免时，就会出现
+  /// **「点小组件偶尔才能打开 App」**（应用刚在前台时能成，过一阵就不行）。
+  ///
+  /// Android 的 BAL 豁免清单里有一条：**持有 `SYSTEM_ALERT_WINDOW` 的应用**。
+  /// 国产 ROM 也把它当「后台弹出界面」的判据（OPPO 的检测就是 `Settings.canDrawOverlays`）。
+  ///
+  /// 该权限必须由用户在系统设置里手动授予，无法代码直授 —— 所以只能检测 + 引导。
+  Future<bool> hasSystemAlertWindow() async {
+    final status = await ph.Permission.systemAlertWindow.status;
+    return status.isGranted;
+  }
+
+  /// 申请 / 跳转「显示在其他应用上层」设置页。
+  ///
+  /// Android 上 `permission_handler` 会跳到本应用的悬浮窗开关页，用户手动开启。
+  Future<bool> requestSystemAlertWindow() async {
+    debugPrint('🔐 [PermissionManager] requestSystemAlertWindow()');
+    final status = await ph.Permission.systemAlertWindow.request();
+    debugPrint('🔐 [PermissionManager] systemAlertWindow → ${status.isGranted}');
+    return status.isGranted;
+  }
+
+  // ============================================================
   //  5. 批量请求（一站式启动入口）
   // ============================================================
 

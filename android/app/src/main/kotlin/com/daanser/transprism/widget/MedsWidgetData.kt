@@ -1,12 +1,14 @@
 package com.daanser.transprism.widget
 
 import android.content.Context
+import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -23,21 +25,40 @@ enum class MedsStockState { CRITICAL, OK }
 /** 进度条颜色：琥珀=库存告急，粉=逾期，青=未逾期 */
 enum class MedsBarColor { AMBER, PINK, CYAN }
 
+/** 2×2 预览矩阵的四个状态：待服/已超 × 缺货/库存足 */
+enum class SmallPreviewState {
+    WAITING_IN_STOCK,
+    WAITING_CRITICAL,
+    OVERDUE_IN_STOCK,
+    OVERDUE_CRITICAL,
+}
+
 data class MedsWidgetItem(
+    /**
+     * 药物 id —— **整行点击记的就是这一条**（v2 起每行独立可点）。
+     * 旧版中卡整卡只有一个通用「记一次」，用户无法判断写入哪条。
+     */
+    val drugId: String,
     val name: String,
     /** 药名正下方，字号小于药名：「库存不足 1 次」/「剩 4 次」 */
     val stockText: String,
-    /** 右对齐同一竖线，tabular-nums：「已超 9 小时」/「1天20小时」 */
+    /** 右对齐同一竖线，固定宽 + TextAlign.End：「已超 9 小时」/「1天20小时」 */
     val timeText: String,
     val timeState: MedsTimeState,
     val stockState: MedsStockState,
     val barColor: MedsBarColor,
     /** 0f..1f，**不拉满**：库存不足给短琥珀条 */
     val barWidthFraction: Float,
+    /**
+     * 是否为「下一剂」—— **整个小组件里唯一的默认写入目标**。
+     * 排序：已超最久 → 待服剩余最短（见 [MedsWidgetDataLoader] 的 `computed` 排序）。
+     * 该行左侧画粉/青竖条 + 浅底高亮，右上按钮也指向同一条药。
+     */
+    val isNext: Boolean,
 )
 
 data class MedsWidgetWeek(
-    /** 7 个点，索引 0 = 6 天前，索引 6 = 今天 */
+    /** 7 个点，索引 0 = 6 天前，索引 6 = 今天。**恒为 7 个**，与右侧 `n/7` 对得上。 */
     val days: List<Boolean>,
     /** 「5/7」 */
     val countText: String,
@@ -46,24 +67,36 @@ data class MedsWidgetWeek(
     val label: String = "近 7 天"
 }
 
-/** 小卡聚焦的单条药 */
+/** 小卡聚焦的单条药 —— **只展示「下一剂」那一条**（与 3×4 高亮行同一条） */
 data class MedsSmallFocus(
-    /** 药物 id —— 打卡 / 库存深链的真实目标 */
+    /** 药物 id —— 打卡的真实目标 */
     val drugId: String,
     val name: String,
-    /** 「已超」 */
+    /** 「待服」/「已超」—— 环下小标签 */
     val stateText: String,
-    /** 「9」—— 主视觉大字 */
+    /** 「9」—— 环心主数字 */
     val numberText: String,
-    /** 「小时」—— 跟在数字旁的小字 */
+    /** 「小时」/「分钟」—— 主数字下方小字 */
     val unitText: String,
-    /** 逾期 → 状态点粉；未逾期 → 青 */
+    /** 逾期 → 环与数字用粉；未逾期 → 用青 */
     val isOverdue: Boolean,
+    /** 库存告急 → 药名旁加一行琥珀小字「库存不足」（**不**做第二个按钮） */
+    val isCritical: Boolean,
+    /**
+     * 环形进度 0f..1f。
+     * 口径 = **距离下次剂量的时间进度**（已超恒为 1f），
+     * 详见 [MedsRingRenderer] 类注释 —— 这是写进注释的唯一口径，不要换成「今日完成度」。
+     */
+    val progress: Float,
 )
 
 data class MedsWidgetData(
     /** 「今日 1/4」 */
     val headerText: String,
+    /**
+     * 中卡三行（最多 3 条）。**第 0 条（`isNext == true`）就是「下一剂」**，
+     * 也是右上按钮「记 {药名}」指向的那一条 —— 两者同源，不会各说各话。
+     */
     val items: List<MedsWidgetItem>,
     val week: MedsWidgetWeek,
     val small: MedsSmallFocus?,
@@ -87,6 +120,7 @@ data class MedsWidgetData(
  */
 object MedsWidgetDataLoader {
 
+    private const val TAG = "TP-Widget"
     private const val PREFS_NAME = "FlutterSharedPreferences"
     private const val KEY_PREFIX = "flutter."
     private const val KEY_DRUGS = "drug_inventory_list"
@@ -105,11 +139,22 @@ object MedsWidgetDataLoader {
     /** 库存告急的短琥珀条（定稿：约 22%，不要拉满整行） */
     private const val BAR_CRITICAL = 0.22f
 
+    /** 兜底给药间隔：拿不到 interval / dailyTimes 时按 24h 算环进度 */
+    private const val FALLBACK_INTERVAL_MINUTES = 24.0 * 60.0
+
     fun load(context: Context): MedsWidgetData {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val drugs = parseDrugs(prefs.getString(KEY_PREFIX + KEY_DRUGS, null))
         val logs = parseLogs(prefs.getString(KEY_PREFIX + KEY_LOGS, null))
-        return build(drugs, logs)
+        val data = build(drugs, logs)
+        // 排查「卡片没跟上数据」时看这一行：它能直接区分
+        // ① 小组件读到的是旧快照，还是 ② 数据是新的但没推给 Launcher
+        Log.d(
+            TAG,
+            "load: ${drugs.size} 药 / ${logs.size} 日志 → ${data.headerText} | " +
+                data.items.joinToString { "${it.name}·${it.timeText}" },
+        )
+        return data
     }
 
     // ─────────────────────────── 解析 ───────────────────────────
@@ -126,6 +171,9 @@ object MedsWidgetDataLoader {
     )
 
     private data class RawLog(val medicationId: String, val timestamp: LocalDateTime)
+
+    /** 单味药算出的「距下次剂量还有多少分钟」+ 是否已超 */
+    private data class Computed(val drug: RawDrug, val minutes: Long, val overdue: Boolean)
 
     private fun parseDrugs(json: String?): List<RawDrug> {
         if (json.isNullOrBlank()) return emptyList()
@@ -201,8 +249,6 @@ object MedsWidgetDataLoader {
         val today = LocalDate.now()
 
         // 每味药算出「逾期 / 剩余」时长
-        data class Computed(val drug: RawDrug, val minutes: Long, val overdue: Boolean)
-
         val computed = drugs
             .filter { it.reminderEnabled }
             .mapNotNull { d ->
@@ -210,13 +256,14 @@ object MedsWidgetDataLoader {
                 val minutes = java.time.Duration.between(now, next).toMinutes()
                 Computed(d, minutes, minutes < 0)
             }
-            // 逾期最久的排最前 —— 中卡第一行就是最该处理的那条
+            // 逾期最久的排最前 —— 中卡第一行、小卡那一条都是「最该处理的那条」
             .sortedWith(compareByDescending<Computed> { it.overdue }.thenBy { it.minutes })
 
-        val items = computed.take(MEDIUM_ROWS).map { c ->
+        val items = computed.take(MEDIUM_ROWS).mapIndexed { index, c ->
             val remaining = remainingDoses(c.drug)
             val critical = remaining <= CRITICAL_DOSES
             MedsWidgetItem(
+                drugId = c.drug.id,
                 name = c.drug.name,
                 stockText = if (critical) "库存不足 $remaining 次" else "剩 $remaining 次",
                 timeText = timeTextOf(c.minutes, c.overdue),
@@ -232,25 +279,31 @@ object MedsWidgetDataLoader {
                 } else {
                     (remaining / BAR_BASE_DOSES).coerceIn(BAR_MIN, BAR_MAX)
                 },
+                // 第 0 行 = 下一剂 = 唯一默认写入目标（高亮行）
+                isNext = index == 0,
             )
         }
 
-        // 近 7 天：索引 0 = 6 天前 … 索引 6 = 今天
+        // 近 7 天：索引 0 = 6 天前 … 索引 6 = 今天，**恒 7 个点**
         val loggedDays = logs.map { it.timestamp.toLocalDate() }.toSet()
         val days = (6 downTo 0).map { offset -> today.minusDays(offset.toLong()) in loggedDays }
         val done = days.count { it }
 
-        // 小卡聚焦：逾期最久的那条；全部未逾期则取最近待服药的那条
+        // 小卡聚焦：与中卡第 0 行**同一条**（逾期最久；全部未逾期则取最近待服）
         val focus = computed.firstOrNull()
         val small = focus?.let { c ->
-            val overdueHours = if (c.overdue) (-c.minutes / 60) else 0
+            val overdue = c.overdue
+            val minutes = abs(c.minutes)
+            val critical = remainingDoses(c.drug) <= CRITICAL_DOSES
             MedsSmallFocus(
                 drugId = c.drug.id,
                 name = c.drug.name,
-                stateText = if (c.overdue) "已超" else "待服",
-                numberText = if (c.overdue) overdueHours.toString() else hoursOf(c.minutes).toString(),
-                unitText = "小时",
-                isOverdue = c.overdue,
+                stateText = if (overdue) "已超" else "待服",
+                numberText = if (minutes >= 60) (minutes / 60).toString() else minutes.toString(),
+                unitText = if (minutes >= 60) "小时" else "分钟",
+                isOverdue = overdue,
+                isCritical = critical,
+                progress = ringProgress(c),
             )
         }
 
@@ -262,6 +315,28 @@ object MedsWidgetDataLoader {
         )
     }
 
+    /**
+     * 环形进度口径 = **距离下次剂量的时间进度**（唯一口径，见 [MedsRingRenderer]）：
+     *
+     *     progress = 1 − 剩余分钟 / 给药间隔分钟
+     *
+     * 已超时恒为 1f（整圈）。
+     */
+    private fun ringProgress(c: Computed): Float {
+        if (c.overdue) return 1f
+        val interval = intervalMinutesOf(c.drug)
+        if (interval <= 0.0) return 0f
+        val elapsed = interval - c.minutes.toDouble()
+        return (elapsed / interval).coerceIn(0.0, 1.0).toFloat()
+    }
+
+    /** 给药间隔（分钟）：离散时刻模式按 24h/时刻数，否则用 intervalValue 折算 */
+    private fun intervalMinutesOf(d: RawDrug): Double = when {
+        d.dailyTimes.isNotEmpty() -> FALLBACK_INTERVAL_MINUTES / d.dailyTimes.size
+        d.intervalHours > 0 -> d.intervalHours * 60.0
+        else -> FALLBACK_INTERVAL_MINUTES
+    }
+
     /** 剩余可用次数（库存 / 单次剂量） */
     private fun remainingDoses(d: RawDrug): Int {
         if (d.dosage <= 0.0) return 0
@@ -270,20 +345,19 @@ object MedsWidgetDataLoader {
 
     /**
      * 时间文案：
-     *  - 逾期  → 「已超 9 小时」（带空格，粉）
-     *  - 未逾期 → 「1天20小时」（无空格，青）；不足一天则「3 小时」
+     *  - 逾期  → 「已超 9 小时」（带空格，粉）/ 不足 1 小时 → 「已超 20 分钟」
+     *  - 未逾期 → 「1天20小时」（无空格，青）；不足一天则「3 小时」/「20 分钟」
      */
     private fun timeTextOf(minutes: Long, overdue: Boolean): String {
-        val abs = kotlin.math.abs(minutes)
-        val hours = abs / 60
+        val absMinutes = abs(minutes)
+        if (absMinutes < 60) return if (overdue) "已超 $absMinutes 分钟" else "$absMinutes 分钟"
+        val hours = absMinutes / 60
         return if (overdue) {
             "已超 $hours 小时"
         } else {
             if (hours >= 24) "${hours / 24}天${hours % 24}小时" else "$hours 小时"
         }
     }
-
-    private fun hoursOf(minutes: Long): Long = kotlin.math.abs(minutes) / 60
 
     /** 今日已打卡条数 */
     private fun todayDone(drugs: List<RawDrug>, logs: List<RawLog>, today: LocalDate): Int {
@@ -329,22 +403,32 @@ object MedsWidgetDataLoader {
     // ─────────────────────────── 预览用假数据 ───────────────────────────
 
     /**
-     * 完全对齐定稿预览的假数据，供 Glance preview / @Preview 使用。
-     * 文案逐字取自预览：今日 1/4、已超 9 小时、库存不足 1 次、剩 4 次、1天20小时、5/7。
+     * 中卡预览数据：**一张卡同时覆盖三种状态**，便于一眼验收配色。
+     *
+     * | 行 | 状态 | 高亮 | 库存 | 条色 |
+     * |---|---|---|---|---|
+     * | 1 | 已超 9 小时 | ✅ 下一剂（粉竖条 + 粉浅底） | 缺货 0 次 | 短琥珀 |
+     * | 2 | 已超 3 小时 | — | 剩 4 次 | 粉 |
+     * | 3 | 待服 1天20小时 | — | 剩 21 次 | 青 |
+     *
+     * 文案逐字取自定稿预览：今日 1/4、已超 9 小时、库存不足 0 次、剩 4 次、1天20小时、5/7。
      */
-    fun preview(): MedsWidgetData = MedsWidgetData(
+    fun previewMedium(): MedsWidgetData = MedsWidgetData(
         headerText = "今日 1/4",
         items = listOf(
             MedsWidgetItem(
+                drugId = "preview-drug-progesterone",
                 name = "黄体酮注射液",
-                stockText = "库存不足 1 次",
+                stockText = "库存不足 0 次",
                 timeText = "已超 9 小时",
                 timeState = MedsTimeState.OVERDUE,
                 stockState = MedsStockState.CRITICAL,
                 barColor = MedsBarColor.AMBER,
                 barWidthFraction = 0.22f,
+                isNext = true,
             ),
             MedsWidgetItem(
+                drugId = "preview-drug-estradiol",
                 name = "戊酸雌二醇",
                 stockText = "剩 4 次",
                 timeText = "已超 3 小时",
@@ -352,8 +436,10 @@ object MedsWidgetDataLoader {
                 stockState = MedsStockState.OK,
                 barColor = MedsBarColor.PINK,
                 barWidthFraction = 0.52f,
+                isNext = false,
             ),
             MedsWidgetItem(
+                drugId = "preview-drug-spiro",
                 name = "螺内酯",
                 stockText = "剩 21 次",
                 timeText = "1天20小时",
@@ -361,19 +447,39 @@ object MedsWidgetDataLoader {
                 stockState = MedsStockState.OK,
                 barColor = MedsBarColor.CYAN,
                 barWidthFraction = 0.68f,
+                isNext = false,
             ),
         ),
         week = MedsWidgetWeek(
             days = listOf(false, true, true, false, true, true, true),
             countText = "5/7",
         ),
-        small = MedsSmallFocus(
-            drugId = "preview-drug-1",
-            name = "黄体酮注射液",
-            stateText = "已超",
-            numberText = "9",
-            unitText = "小时",
-            isOverdue = true,
-        ),
+        small = previewSmall(SmallPreviewState.OVERDUE_CRITICAL),
     )
+
+    /**
+     * 小卡预览矩阵 —— **待服 / 已超 × 缺货 / 库存足** 四态。
+     *
+     * 浅色 / 深色两套由 [MedsWidgetThemePrefs] 决定（跟 App 主题偏好），
+     * 所以「浅/深」不在这里出变体：在 App「我的 → 主题模式」切一下即可。
+     *
+     * 默认渲染哪一态见 `SmallMedsWidget.PREVIEW_SMALL_STATE`。
+     */
+    fun previewSmall(state: SmallPreviewState): MedsSmallFocus {
+        val overdue = state == SmallPreviewState.OVERDUE_IN_STOCK ||
+                state == SmallPreviewState.OVERDUE_CRITICAL
+        val critical = state == SmallPreviewState.WAITING_CRITICAL ||
+                state == SmallPreviewState.OVERDUE_CRITICAL
+        return MedsSmallFocus(
+            drugId = "preview-drug-progesterone",
+            name = "黄体酮注射液",
+            stateText = if (overdue) "已超" else "待服",
+            numberText = if (overdue) "9" else "4",
+            unitText = "小时",
+            isOverdue = overdue,
+            isCritical = critical,
+            // 待服：走了 4/12 个间隔 → 0.33；已超：整圈
+            progress = if (overdue) 1f else 0.33f,
+        )
+    }
 }

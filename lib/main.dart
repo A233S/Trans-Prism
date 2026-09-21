@@ -27,6 +27,7 @@ import 'screens/workspace_tab.dart';
 import 'services/home_module_visibility.dart';
 import 'services/image_export_service.dart';
 import 'services/medication_service.dart';
+import 'services/meds_widget_service.dart';
 import 'services/resource_service.dart';
 import 'services/notification_service.dart';
 import 'services/update_service.dart';
@@ -41,6 +42,7 @@ import 'widgets/glass_dialog.dart';
 import 'widgets/glass_sheet.dart';
 import 'widgets/glass_surface.dart';
 import 'widgets/liquid_glass_nav.dart';
+import 'widgets/record_dose_dialog.dart';
 import 'widgets/update_dialog.dart';
 import 'widgets/battery_optimization_guide_card.dart';
 import 'storage/disclaimer_repository.dart';
@@ -723,7 +725,8 @@ class AppRootController extends StatefulWidget {
   State<AppRootController> createState() => _AppRootControllerState();
 }
 
-class _AppRootControllerState extends State<AppRootController> {
+class _AppRootControllerState extends State<AppRootController>
+    with WidgetsBindingObserver {
   final GenderIdentityRepository _genderRepository = GenderIdentityRepository();
   final DisclaimerRepository _disclaimerRepository = DisclaimerRepository();
   String? _genderIdentity;
@@ -740,6 +743,7 @@ class _AppRootControllerState extends State<AppRootController> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadAppState();
     _loadGreetingSettings();
     WikiSyncService.instance.syncAllInBackground();
@@ -747,6 +751,31 @@ class _AppRootControllerState extends State<AppRootController> {
     _initNotifications();
     _initResourceService();
     _initWidgetActions();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// App 生命周期变化时刷新桌面用药小组件。
+  ///
+  /// - **resumed**：覆盖 ①「跟随系统」下用户改了系统深浅色；② 冷启动补刷。
+  /// - **paused**：App 退到后台时补刷。这条**不是可选项** ——
+  ///   真机实测（2026-09-19）：App 停在前台时发出的刷新请求，
+  ///   Glance 只会跑 `refreshAll`，**不会重组卡片**（logcat 里没有 `load:`）；
+  ///   而 App 在后台 / 刚启动时发出的请求都能正常重组。
+  ///
+  ///   用户从桌面点小组件 → Sheet 点「确认服药」→ 按 home 回桌面，
+  ///   走的正是「paused」这条路径，所以在这里补一次，**保证用户看到卡片时它已经是最新的**。
+  ///   原生侧有 700ms 尾沿去抖，两次请求会合并成一次，不会重复渲染。
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed ||
+        state == AppLifecycleState.paused) {
+      MedsWidgetService.refresh();
+    }
   }
 
   Future<void> _initNotifications() async {
@@ -777,27 +806,33 @@ class _AppRootControllerState extends State<AppRootController> {
   // MedicationService.executeMedicationDose —— 业务逻辑零复制、零新增存储。
   // ──────────────────────────────────────────────
 
-  /// 注册热启动推送，并拉取冷启动时暂存的动作。
-  Future<void> _initWidgetActions() async {
-    _widgetChannel.setMethodCallHandler((call) async {
-      if (call.method == 'onWidgetAction' && call.arguments is Map) {
-        await _dispatchWidgetAction(
-          Map<String, dynamic>.from(call.arguments as Map),
-        );
-      }
-      return null;
-    });
+    /// 注册热启动推送，并拉取冷启动时暂存的动作。
+    Future<void> _initWidgetActions() async {
+      _widgetChannel.setMethodCallHandler((call) async {
+        if (call.method == 'onWidgetAction' && call.arguments is Map) {
+          await _dispatchWidgetAction(
+            Map<String, dynamic>.from(call.arguments as Map),
+          );
+        }
+        return null;
+      });
 
-    try {
-      final launch =
-          await _widgetChannel.invokeMethod<dynamic>('getLaunchAction');
-      if (launch is Map) {
-        await _dispatchWidgetAction(Map<String, dynamic>.from(launch));
+      try {
+        final launch =
+            await _widgetChannel.invokeMethod<dynamic>('getLaunchAction');
+        if (launch is Map) {
+          await _dispatchWidgetAction(Map<String, dynamic>.from(launch));
+        }
+      } catch (e) {
+        debugPrint('⚠️ [TP-Widget] 拉取启动动作失败(非致命): $e');
       }
-    } catch (e) {
-      debugPrint('⚠️ [TP-Widget] 拉取启动动作失败(非致命): $e');
+
+      // 冷启动也刷一次桌面卡片。
+      // `didChangeAppLifecycleState(resumed)` 在部分机型/启动路径下会早于本 State
+      // 注册观察者，导致启动刷新漏掉；这里显式补一次，保证「打开 App 后卡片一定是最新的」。
+      // 去抖在原生侧（MedsWidgetUpdater），与生命周期那次撞车也只会渲染一次。
+      await MedsWidgetService.refresh();
     }
-  }
 
   /// 分发小组件动作。
   Future<void> _dispatchWidgetAction(Map<String, dynamic> args) async {
@@ -807,8 +842,13 @@ class _AppRootControllerState extends State<AppRootController> {
     debugPrint('🧩 [TP-Widget] action=$action drugId=$drugId name=$drugName');
 
     switch (action) {
+      // ── v3：小组件**不再直接打卡**，只负责「打开该药的记录用药 Sheet」──
+      // `record_dose` 是旧版卡片残留在桌面上的 PendingIntent 会发出的动作；
+      // 这里与 `open_record_sheet` **合并处理** —— 一律只开 Sheet、绝不静默写入，
+      // 保证不存在「无确认就记一笔」的路径。
+      case 'open_record_sheet':
       case 'record_dose':
-        await _recordDoseFromWidget(drugId);
+        await _openRecordSheetFromWidget(drugId, drugName);
         break;
       case 'stock_alert':
         await _openInventoryFromWidget();
@@ -822,29 +862,72 @@ class _AppRootControllerState extends State<AppRootController> {
     }
   }
 
-  /// 「记一次」—— 复用既有打卡 use case，随后刷新桌面卡片。
-  Future<void> _recordDoseFromWidget(String? drugId) async {
+  /// 打开该药的「记录用药」Sheet —— **v3 起小组件唯一的打卡入口**。
+  ///
+  /// ⚠️ 本方法**不写任何数据**：
+  /// - 只有用户在 Sheet 里点「确认服药」，才会走既有的
+  ///   `RecordDoseDialog._confirmDose()` → `MedicationService.executeMedicationDose()`；
+  /// - 点「取消」或系统返回时 Sheet 返回 `null`，这里直接 return，**不改任何数据**。
+  ///
+  /// 打开方式复用既有 Sheet（`RecordDoseDialog.show(context, drug: drug)`），
+  /// 没有另做一套「小组件专用打卡」。
+  Future<void> _openRecordSheetFromWidget(
+    String? drugId,
+    String? drugName,
+  ) async {
     if (drugId == null || drugId.isEmpty) {
-      // 中卡顶部的通用「记一次」不绑定药物 → 回首页由用户选择
+      // 没有 medId 就无法定位药物 → 退回首页，由用户自己点
       widgetTabRequest.value = 0;
       return;
     }
 
-    try {
-      final log = await MedicationService.executeMedicationDose(drugId);
-      if (log == null) {
-        debugPrint('⚠️ [TP-Widget] 打卡失败：未找到药物 $drugId');
-        widgetTabRequest.value = 0;
+    // 冷启动时小组件动作可能早于首帧 / Navigator 就绪，先等一下
+    await _awaitNavigatorReady();
+
+    final context = appNavigatorKey.currentContext;
+    if (context == null) {
+      debugPrint('⚠️ [TP-Widget] Navigator 未就绪，无法拉起记录用药 Sheet');
+      widgetTabRequest.value = 0;
+      return;
+    }
+
+    final drugs = await MedicationService.loadAllDrugs();
+    final matched = drugs.where((d) => d.id == drugId).toList();
+    if (matched.isEmpty) {
+      debugPrint('⚠️ [TP-Widget] 未找到药物 drugId=$drugId (${drugName ?? ''})');
+      widgetTabRequest.value = 0;
+      return;
+    }
+
+    if (!context.mounted) return;
+    final recorded = await RecordDoseDialog.show(context, drug: matched.first);
+
+    if (recorded != true) {
+      // 取消 / 返回：什么都不发生
+      debugPrint('🧩 [TP-Widget] 记录用药 Sheet 已取消，未写入任何数据');
+      return;
+    }
+
+    // 只有确认服药之后，才刷新桌面卡片（今日 n/4、库存、倒计时）
+    await MedsWidgetService.refresh();
+    if (!context.mounted) return;
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+      const SnackBar(content: Text('已记录一次用药')),
+    );
+  }
+
+  /// 等待根 Navigator 就绪。
+  ///
+  /// 冷启动路径下，`getLaunchAction` 可能在首帧之前就返回了动作，
+  /// 此时 `appNavigatorKey.currentState` 还是 null，直接 `showModalBottomSheet` 会失败。
+  Future<void> _awaitNavigatorReady() async {
+    for (var i = 0; i < 40; i++) {
+      if (appNavigatorKey.currentState != null) {
+        // 再等一帧，确保 Overlay 已挂载
+        await WidgetsBinding.instance.endOfFrame;
         return;
       }
-      // 库存与倒计时已变化 → 立即刷新桌面卡片
-      await _widgetChannel.invokeMethod<dynamic>('refreshWidgets');
-      if (!mounted) return;
-      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-        const SnackBar(content: Text('已记录一次用药')),
-      );
-    } catch (e) {
-      debugPrint('⚠️ [TP-Widget] 打卡异常: $e');
+      await Future<void>.delayed(const Duration(milliseconds: 50));
     }
   }
 
@@ -2336,6 +2419,24 @@ class _ProfileTabState extends State<ProfileTab> {
         const SizedBox(height: 12),
 
         // ═══════════════════════════════════════════════
+        //   外观与显示（续）—— 桌面用药小组件
+        // ═══════════════════════════════════════════════
+        // ── 添加到主屏幕 ──
+        // Android 8+ 走 AppWidgetManager.requestPinAppWidget，系统直接弹
+        // 「添加到主屏幕」确认框；不支持 pin 的设备退化为「长按桌面 → 小组件 → TP」
+        // 的文字说明。**不跳系统设置迷宫页**，也不要求用户自己摸桌面长按。
+        _buildSettingsTile(
+          isDark: isDark,
+          leadingIcon: Icons.add_to_home_screen_rounded,
+          leadingColor: themeService.themeColor,
+          title: '添加到主屏幕',
+          subtitle: null,
+          onTap: () => _showAddToHomeSheet(context),
+        ),
+
+        const SizedBox(height: 12),
+
+        // ═══════════════════════════════════════════════
         //   高级
         // ═══════════════════════════════════════════════
         _buildSectionHeader('高级', isDark: isDark),
@@ -3663,6 +3764,163 @@ class _ProfileTabState extends State<ProfileTab> {
         widget.themeService.setThemeMode(mode);
         Navigator.pop(ctx);
       },
+    );
+  }
+
+  // ════════════════════════════════════════════════════════════
+  //  添加到主屏幕（桌面用药小组件）
+  // ════════════════════════════════════════════════════════════
+
+  /// 「我的 → 外观与显示 → 添加到主屏幕」。
+  ///
+  /// 主路径 = Android 8+ 的 `AppWidgetManager.requestPinAppWidget`
+  /// （见 `android/.../MainActivity.kt` 的 `pinMedsWidget`）：
+  /// 用户选完尺寸后系统直接弹「添加到主屏幕」确认框，**不跳系统设置页**。
+  ///
+  /// 不支持 pin 的设备（API < 26，或 Launcher 未实现该 API）退化为
+  /// 「长按桌面 → 小组件 → Trans Prism」的文字说明，而不是把人丢进设置迷宫。
+  ///
+  /// 文案与小组件自身的 label 对齐：中卡「今日用药」/ 小卡「待服用」。
+  Future<void> _showAddToHomeSheet(BuildContext context) async {
+    final canPin = await MedsWidgetService.canPin();
+    if (!context.mounted) return;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      barrierColor: GlassTheme.modalBarrierColor(context),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        final isDark = Theme.of(ctx).brightness == Brightness.dark;
+        final titleColor =
+            isDark ? const Color(0xFFEDEDF0) : const Color(0xFF333333);
+        return GlassSheet(
+          showGrabHandle: false,
+          child: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 36,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade300,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  Text(
+                    '用药小组件',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      color: titleColor,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    canPin
+                        ? '选一个尺寸，系统会弹出「添加到主屏幕」确认框'
+                        : '当前设备不支持一键添加，可按下面方式手动添加',
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                  const SizedBox(height: 16),
+                  if (canPin) ...[
+                    _buildWidgetSizeOption(
+                      ctx: ctx,
+                      size: MedsWidgetService.sizeMedium,
+                      icon: Icons.calendar_view_day_rounded,
+                      title: '3×4 一览',
+                      desc: '今日用药清单 · 近 7 天打卡 · 点行即记',
+                    ),
+                    const SizedBox(height: 8),
+                    _buildWidgetSizeOption(
+                      ctx: ctx,
+                      size: MedsWidgetService.sizeSmall,
+                      icon: Icons.donut_large_rounded,
+                      title: '2×2 下一剂',
+                      desc: '只显示下一剂 · 环形倒计时 · 一键打卡',
+                    ),
+                  ] else
+                    _buildWidgetManualHint(titleColor),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildWidgetSizeOption({
+    required BuildContext ctx,
+    required String size,
+    required IconData icon,
+    required String title,
+    required String desc,
+  }) {
+    return ListTile(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      leading: Icon(icon, color: widget.themeService.themeColor, size: 24),
+      title: Text(
+        title,
+        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+      ),
+      subtitle: Text(
+        desc,
+        style: const TextStyle(fontSize: 12, color: Colors.grey),
+      ),
+      trailing: const Icon(Icons.add_circle_outline, size: 22),
+      onTap: () async {
+        Navigator.pop(ctx);
+        final ok = await MedsWidgetService.pin(size: size);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(ok ? '已请求添加到主屏幕' : '添加失败，请长按桌面手动添加'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      },
+    );
+  }
+
+  /// 不支持 requestPinAppWidget 时的降级说明（**不跳系统设置页**）
+  Widget _buildWidgetManualHint(Color titleColor) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: widget.themeService.themeColor.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '手动添加方式',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              color: titleColor,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            '1. 长按桌面空白处\n'
+            '2. 选择「小组件」\n'
+            '3. 找到 Trans Prism，选「今日用药」或「待服用」',
+            style: TextStyle(fontSize: 13, height: 1.7),
+          ),
+        ],
+      ),
     );
   }
 

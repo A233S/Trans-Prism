@@ -1,9 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  针筒小图标 —— 路径 1:1 转自定稿预览 outputs/widget_preview.html 的内联 SVG
-  （viewBox 0 0 24 24，stroke-width 1.6，圆头圆角）。
+  针筒小图标 —— 横向注射器（针头朝右）。
 
-  实际渲染时由 Glance `ColorFilter.tint(MedsTokens.muted)` 着色，
+  ⚠️ 2026-09-19 重绘：上一版沿用 Lucide `syringe` 的斜向轮廓路径，
+     在 13~15dp 的实机尺寸下筒身的圆角矩形被压成一圈细环，
+     观感与「回形针」难以区分（真机截图已确认）。产品要求「icon 用针筒」。
+
+  本版改为**横向、部件分明**的画法，小尺寸下仍能一眼认出是针筒：
+    · 细针头（右）
+    · 带两道刻度的筒身（圆角矩形，描边而非填充）
+    · 推杆 + 推杆横档（左）
+
+  渲染时由 Glance `ColorFilter.tint(MedsTokens.muted)` 着色，
   故此处 strokeColor 仅为占位（会被 tint 覆盖），无需 drawable-night 副本。
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
@@ -12,35 +20,44 @@
     android:viewportWidth="24"
     android:viewportHeight="24">
 
-    <!-- 推杆尾 -->
+    <!-- 针头 -->
     <path
-        android:pathData="M18,2 L22,6"
+        android:pathData="M17,12 L22,12"
         android:strokeColor="#FF8A8580"
-        android:strokeWidth="1.6"
+        android:strokeWidth="1.9"
+        android:strokeLineCap="round" />
+
+    <!-- 筒身（圆角矩形，描边） -->
+    <path
+        android:pathData="M6.4,7.5 L15.6,7.5 A1.4,1.4 0 0 1 17,8.9 L17,15.1 A1.4,1.4 0 0 1 15.6,16.5 L6.4,16.5 A1.4,1.4 0 0 1 5,15.1 L5,8.9 A1.4,1.4 0 0 1 6.4,7.5 Z"
+        android:strokeColor="#FF8A8580"
+        android:strokeWidth="1.9"
         android:strokeLineCap="round"
         android:strokeLineJoin="round" />
+
+    <!-- 筒身刻度 ×2 -->
+    <path
+        android:pathData="M8.8,7.5 L8.8,10.6"
+        android:strokeColor="#FF8A8580"
+        android:strokeWidth="1.9"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M12,7.5 L12,10.6"
+        android:strokeColor="#FF8A8580"
+        android:strokeWidth="1.9"
+        android:strokeLineCap="round" />
+
+    <!-- 推杆 -->
+    <path
+        android:pathData="M5,12 L2.2,12"
+        android:strokeColor="#FF8A8580"
+        android:strokeWidth="1.9"
+        android:strokeLineCap="round" />
 
     <!-- 推杆横档 -->
     <path
-        android:pathData="M17,7 L20,4"
+        android:pathData="M2.2,9.2 L2.2,14.8"
         android:strokeColor="#FF8A8580"
-        android:strokeWidth="1.6"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round" />
-
-    <!-- 筒身 + 针头 -->
-    <path
-        android:pathData="M19,9 L8.7,19.3 A2.5,2.5 0 0 1 5.3,19.3 L4.7,18.7 A2.5,2.5 0 0 1 4.7,15.3 L15,5"
-        android:strokeColor="#FF8A8580"
-        android:strokeWidth="1.6"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round" />
-
-    <!-- 刻度 -->
-    <path
-        android:pathData="M9,11 L13,15"
-        android:strokeColor="#FF8A8580"
-        android:strokeWidth="1.6"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round" />
+        android:strokeWidth="1.9"
+        android:strokeLineCap="round" />
 </vector>

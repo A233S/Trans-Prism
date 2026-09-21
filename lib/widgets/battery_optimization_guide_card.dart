@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../services/meds_widget_service.dart';
+import '../services/oem_permission_service.dart';
 import '../services/permission_manager.dart';
 import 'gradient_icon.dart';
 
@@ -33,6 +35,22 @@ class _BatteryOptimizationGuideCardState
   /// 是否正在加载
   bool _loading = true;
 
+  /// 本机是否小米系（小米 / 红米 / POCO / 澎湃 OS）——
+  /// 只有这类机型才有「后台弹出界面」这个权限项
+  bool _isMiui = false;
+
+  /// 「后台弹出界面」是否已允许（仅小米系有意义）
+  bool _bgPopupAllowed = false;
+
+  /// 小组件点击自检；null = 非 Android 或读取失败（UI 隐藏该块）
+  WidgetClickDiag? _clickDiag;
+
+  /// 是否已授予「显示在其他应用上层」（SYSTEM_ALERT_WINDOW）
+  ///
+  /// 这是**小组件点击能否打开 App 的真正关键**：Android 10+ 限制后台启动 Activity，
+  /// 而持有该权限的应用在 BAL 豁免名单内。
+  bool _overlayGranted = false;
+
   @override
   void initState() {
     super.initState();
@@ -42,9 +60,18 @@ class _BatteryOptimizationGuideCardState
   Future<void> _refreshStatuses() async {
     setState(() => _loading = true);
     final statuses = await _permManager.checkPermissionStatuses();
+    final isMiui = await OemPermissionService.isMiuiFamily();
+    final bgPopup =
+        isMiui ? await OemPermissionService.isBackgroundPopupAllowed() : true;
+    final diag = await MedsWidgetService.clickDiag();
+    final overlay = await _permManager.hasSystemAlertWindow();
     if (mounted) {
       setState(() {
         _statuses = statuses;
+        _isMiui = isMiui;
+        _bgPopupAllowed = bgPopup;
+        _clickDiag = diag;
+        _overlayGranted = overlay;
         _loading = false;
       });
     }
@@ -176,10 +203,149 @@ class _BatteryOptimizationGuideCardState
                 // 如果电池优化已允许，标记为黄色「建议确认」
                 // 如果未允许，标记为红色「强烈建议」
               ),
+              // 小米 / 澎湃 OS 专属：该权限默认拒绝，会拦掉小组件点击后的 Activity 启动
+              if (_isMiui) ...[
+                const Divider(height: 1, indent: 0),
+                _buildStatusItem(
+                  isDark: isDark,
+                  icon: Icons.widgets_outlined,
+                  title: '后台弹出界面',
+                  granted: _bgPopupAllowed,
+                  grantedLabel: '已允许',
+                  deniedLabel: '点小组件没反应？去开启',
+                  onDeniedTap: () => _handleOpenBackgroundPopup(context),
+                ),
+              ],
+              // 「显示在其他应用上层」—— 小组件点击能否打开 App 的关键（所有机型都显示）
+              const Divider(height: 1, indent: 0),
+              _buildStatusItem(
+                isDark: isDark,
+                icon: Icons.layers_outlined,
+                title: '显示在其他应用上层',
+                granted: _overlayGranted,
+                grantedLabel: '已允许',
+                deniedLabel: '点小组件打不开？去开启',
+                onDeniedTap: () => _handleOpenOverlayPermission(context),
+              ),
+              // 小组件点击自检：区分「广播没送到」与「Activity 启动被拦」
+              if (_clickDiag != null) ...[
+                const Divider(height: 1, indent: 0),
+                _buildClickDiagBlock(
+                  isDark: isDark,
+                  textColor: textColor,
+                  secondaryColor: secondaryColor,
+                ),
+              ],
             ],
           ],
         ),
       ),
+    );
+  }
+
+  /// 小组件点击自检块 —— 把「哪一段断了」直接摆出来，不需要 adb。
+  ///
+  /// 三个指标（原生 `MedsWidgetDiag` 落盘）：
+  /// - **卡片最近渲染**：排除「桌面上是旧卡片」这个干扰项；
+  /// - **被小组件拉起**：终点指标 —— 只要 > 0，就说明点击真能把 App 拉起来；
+  /// - **广播收到**：备用广播路径的计数（澎湃 OS 实测恒为 0）。
+  Widget _buildClickDiagBlock({
+    required bool isDark,
+    required Color textColor,
+    required Color secondaryColor,
+  }) {
+    final d = _clickDiag!;
+
+    String two(int n) => n.toString().padLeft(2, '0');
+    String fmt(DateTime? t) => t == null
+        ? '从未'
+        : '${two(t.month)}-${two(t.day)} ${two(t.hour)}:${two(t.minute)}';
+
+    final String hint;
+    final Color hintColor;
+    if (d.everLaunched) {
+      hint = '点击能正常拉起 App ✅';
+      hintColor = const Color(0xFF2E9E5B);
+    } else if (d.renderTime != null) {
+      hint = '卡片是当前版本（渲染时间见上），但点击没能拉起 App —— '
+          '这是系统拦掉了「从后台启动界面」。'
+          '请开启上方的「显示在其他应用上层」，再点一次小组件。';
+      hintColor = const Color(0xFFD08700);
+    } else {
+      hint = '卡片还没渲染过：请先在桌面上添加用药小组件，再回来查看。';
+      hintColor = secondaryColor;
+    }
+
+    final launchText =
+        d.everLaunched ? '${d.launchCount} 次 · 最近 ${fmt(d.launchTime)}' : '0 次';
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 14, 20, 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.insights_outlined, size: 18, color: secondaryColor),
+              const SizedBox(width: 8),
+              Text(
+                '小组件点击自检',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: textColor,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          _diagLine('卡片最近渲染', fmt(d.renderTime), textColor, secondaryColor),
+          const SizedBox(height: 4),
+          _diagLine('被小组件拉起', launchText, textColor, secondaryColor),
+          const SizedBox(height: 4),
+          _diagLine(
+            '广播收到',
+            '${d.clickCount} 次',
+            textColor,
+            secondaryColor,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            hint,
+            style: TextStyle(fontSize: 12, height: 1.5, color: hintColor),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 自检块里的「标签 —— 值」一行
+  Widget _diagLine(
+    String label,
+    String value,
+    Color textColor,
+    Color secondaryColor,
+  ) {
+    return Row(
+      children: [
+        SizedBox(
+          width: 104,
+          child: Text(
+            label,
+            style: TextStyle(fontSize: 12.5, color: secondaryColor),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
+              color: textColor,
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -371,6 +537,29 @@ class _BatteryOptimizationGuideCardState
               number: '3',
               text: '在近期任务列表中将本应用下划锁定 🔒',
             ),
+            SizedBox(height: 14),
+            Text(
+              '小米 / 澎湃 OS 请额外确认以下两项：',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                height: 1.5,
+              ),
+            ),
+            SizedBox(height: 8),
+            _StepLabel(
+              number: '4',
+              text: '省电策略改为「无限制」\n'
+                  '（设置 → 应用设置 → 应用管理 → Trans Prism → 省电策略）。'
+                  '被系统强行停止后，桌面小组件会变成灰色占位图且点击无反应。',
+            ),
+            SizedBox(height: 6),
+            _StepLabel(
+              number: '5',
+              text: '开启「后台弹出界面」\n'
+                  '（设置 → 应用设置 → Trans Prism → 权限管理 → 后台弹出界面）。'
+                  '该权限在澎湃 OS 上默认关闭，未开启时点桌面小组件不会打开 App。',
+            ),
           ],
         ),
         actions: [
@@ -390,6 +579,142 @@ class _BatteryOptimizationGuideCardState
     );
     if (shouldOpen == true && mounted) {
       await _permManager.openAutoStartSettings();
+    }
+  }
+
+  /// 「显示在其他应用上层」引导 + 跳转。
+  ///
+  /// 这是小组件点击问题的**正解**：Android 10+ 的「后台启动 Activity 限制」（BAL）
+  /// 会拦掉「从后台拉起 App」，而小组件点击正是这种操作 ——
+  /// 表现为「刚看完 App 时能点开，过一阵就点不开了」。
+  ///
+  /// Android 的 BAL 豁免清单里有一条：**持有 `SYSTEM_ALERT_WINDOW` 的应用**。
+  /// 该权限必须用户手动授予，所以这里做「检测 → 说明 → 跳转 → 回来自动刷新」。
+  Future<void> _handleOpenOverlayPermission(BuildContext context) async {
+    final shouldOpen = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(
+              Icons.layers_outlined,
+              color: Theme.of(context).brightness == Brightness.dark
+                  ? const Color(0xFFE5E5EA)
+                  : const Color(0xFF333338),
+            ),
+            const SizedBox(width: 8),
+            const Expanded(
+              child: Text(
+                '显示在其他应用上层',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ),
+          ],
+        ),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '系统限制应用在「后台」启动界面。桌面小组件的点击正属于这种操作，'
+              '所以未开启时会出现「点小组件打不开、或者要点很多次」。',
+              style: TextStyle(fontSize: 13, height: 1.5),
+            ),
+            SizedBox(height: 12),
+            _StepLabel(number: '1', text: '点下方「去开启」，进入本应用的悬浮窗开关'),
+            SizedBox(height: 6),
+            _StepLabel(number: '2', text: '打开「允许显示在其他应用上层」'),
+            SizedBox(height: 6),
+            _StepLabel(number: '3', text: '返回桌面再点小组件，即可稳定打开'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('稍后'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.primary,
+            ),
+            child: const Text('去开启'),
+          ),
+        ],
+      ),
+    );
+    if (shouldOpen == true && mounted) {
+      await _permManager.requestSystemAlertWindow();
+      if (mounted) await _refreshStatuses();
+    }
+  }
+
+  /// 小米 / 澎湃 OS：「后台弹出界面」引导 + 跳转
+  ///
+  /// 这条是「桌面小组件点了不弹应用」的直接嫌疑：小组件点击要走
+  /// `PendingIntent → 中转 Activity → MainActivity`，而该权限默认拒绝、
+  /// 会拦掉后台的 Activity 启动。卡片本身渲染不受影响，所以用户看到的是
+  /// 「显示正常但点了没反应」。
+  Future<void> _handleOpenBackgroundPopup(BuildContext context) async {
+    final shouldOpen = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(
+              Icons.widgets_outlined,
+              color: Theme.of(context).brightness == Brightness.dark
+                  ? const Color(0xFFE5E5EA)
+                  : const Color(0xFF333338),
+            ),
+            const SizedBox(width: 8),
+            const Expanded(
+              child: Text(
+                '后台弹出界面',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ),
+          ],
+        ),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '小米 / 澎湃 OS 的「后台弹出界面」权限默认是关闭的。'
+              '关闭时，点桌面用药小组件不会打开 App（卡片显示正常，但点了没反应）。',
+              style: TextStyle(fontSize: 13, height: 1.5),
+            ),
+            SizedBox(height: 12),
+            _StepLabel(number: '1', text: '点下方「去开启」，进入权限管理页'),
+            SizedBox(height: 6),
+            _StepLabel(number: '2', text: '找到「后台弹出界面」并选择「允许」'),
+            SizedBox(height: 6),
+            _StepLabel(
+              number: '3',
+              text: '回到桌面再点一次小组件即可正常打开',
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('稍后'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.primary,
+            ),
+            child: const Text('去开启'),
+          ),
+        ],
+      ),
+    );
+    if (shouldOpen == true && mounted) {
+      await OemPermissionService.openBackgroundPopupSettings();
+      // 用户可能已经开启，回来自动刷新一次状态
+      if (mounted) await _refreshStatuses();
     }
   }
 }

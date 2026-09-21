@@ -67,3 +67,6 @@ android/build/
 * 7.*
 * 8.*
 * 9.*
+
+# Agent 工作目录（记忆/技能等本地数据，不随仓库分发）
+.workbuddy-ai/
