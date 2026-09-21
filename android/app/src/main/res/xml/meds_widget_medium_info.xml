@@ -2,9 +2,11 @@
 <!--
   中尺寸用药小组件。
   尺寸按 Android 单元格公式 70*n - 30：4 列 → 250dp。
-  高度取 3 行（180dp）而非 2 行：实测 4x2 的实际渲染高度约 203dp，
-  而「三行药 + 近 7 天底栏」需要约 234dp，4x2 会裁掉底栏。
-  按「三行药+底栏不裁切为准」的验收条件，此处锁定 4x3。
+  高度默认仍按 **3 行**放置（保持既有默认观感不变）。
+  真机实测（小米澎湃 OS，2026-09-21）：两格高 152dp / 三格高 221dp，一格 ≈ 69dp。
+  内容自然高约 191dp，所以**手动缩到两格高时底栏会被切约 40dp**。
+  现由 MedsDims.mediumVertical 按可用高度自适应：< 200dp 走紧凑档（省 48dp，能完整放下），
+  ≥ 200dp 走常规档（默认三格高观感完全不变）。
 -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:minWidth="250dp"

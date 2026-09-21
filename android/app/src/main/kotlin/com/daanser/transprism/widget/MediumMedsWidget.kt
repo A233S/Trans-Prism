@@ -2,9 +2,12 @@ package com.daanser.transprism.widget
 
 import android.content.Context
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.glance.GlanceId
+import android.util.Log
 import androidx.glance.GlanceModifier
+import androidx.glance.LocalSize
 import androidx.glance.action.Action
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
@@ -87,6 +90,12 @@ class MediumMedsWidget : GlanceAppWidget() {
         provideContent {
             // 自检：记录「卡片最近一次渲染时刻」—— 用来永久排除「桌面上是旧卡片」这个干扰
             MedsWidgetDiag.recordRender(context)
+            // 记录本次可用尺寸：中卡的竖向预算很紧，调排版必须知道真实高度
+            val size = LocalSize.current
+            Log.d(
+                "TP-Widget",
+                "medium size: " + size.width.value.toInt() + " x " + size.height.value.toInt() + " dp",
+            )
             val colors = MedsWidgetThemePrefs.colorsFor(context)
             val data = MedsWidgetDataLoader.load(context)
             MedsWidgetThemeProvider(colors) { MediumMedsContent(data) }
@@ -113,6 +122,8 @@ class MediumMedsWidget : GlanceAppWidget() {
 
 @Composable
 private fun MediumMedsContent(data: MedsWidgetData) {
+    // 竖向档位随可用高度自适应：两格高走紧凑档（底栏不再被切），三格高走常规档
+    val v = MedsDims.mediumVertical()
     Box(
         modifier = GlanceModifier
             .fillMaxSize()
@@ -126,13 +137,13 @@ private fun MediumMedsContent(data: MedsWidgetData) {
                 .fillMaxSize()
                 .padding(
                     start = MedsDims.mediumPaddingH,
-                    top = MedsDims.mediumPaddingTop,
+                    top = v.padTop,
                     end = MedsDims.mediumPaddingH,
-                    bottom = MedsDims.mediumPaddingBottom,
+                    bottom = v.padBottom,
                 ),
         ) {
             MediumHeader(data)
-            Spacer(GlanceModifier.height(8.dp))
+            Spacer(GlanceModifier.height(v.headerGap))
 
             // 三行药：固定间距，整体在剩余空间里垂直居中。
             // Glance 1.2.0 的 Row/Column **最多 10 个子元素**，超了直接抛
@@ -141,17 +152,19 @@ private fun MediumMedsContent(data: MedsWidgetData) {
                 modifier = GlanceModifier
                     .fillMaxWidth()
                     .defaultWeight(),
-                contentAlignment = Alignment.Center,
+                // 顶部对齐：高度富余时留白落在底栏上方（页脚感），
+                // 而不是上下均分把三行撑得发空
+                contentAlignment = Alignment.TopStart,
             ) {
                 Column(modifier = GlanceModifier.fillMaxWidth()) {
                     data.items.forEachIndexed { index, item ->
-                        if (index > 0) Spacer(GlanceModifier.height(MedsDims.rowGap))
-                        MediumRow(item)
+                        if (index > 0) Spacer(GlanceModifier.height(v.rowGap))
+                        MediumRow(item, v.rowPadV)
                     }
                 }
             }
 
-            MediumWeekRow(data.week)
+            MediumWeekRow(data.week, v.weekPadV)
         }
     }
 }
@@ -201,7 +214,7 @@ private fun MediumHeader(data: MedsWidgetData) {
  *   固定宽右对齐是等效观感。
  */
 @Composable
-private fun MediumRow(item: MedsWidgetItem) {
+private fun MediumRow(item: MedsWidgetItem, rowPadV: Dp) {
     Column(
         modifier = GlanceModifier
             .fillMaxWidth()
@@ -213,7 +226,7 @@ private fun MediumRow(item: MedsWidgetItem) {
                 }
             )
             .cornerRadius(MedsDims.rowRadius)
-            .padding(horizontal = MedsDims.rowPaddingH, vertical = MedsDims.rowPaddingV)
+            .padding(horizontal = MedsDims.rowPaddingH, vertical = rowPadV)
             .clickable(openRecordSheetAction(item.drugId, item.name)),
     ) {
         Row(
@@ -286,9 +299,9 @@ private fun MediumRow(item: MedsWidgetItem) {
  *    用后面的 `Spacer(defaultWeight())` 去吞掉剩余空间。
  */
 @Composable
-private fun MediumWeekRow(week: MedsWidgetWeek) {
+private fun MediumWeekRow(week: MedsWidgetWeek, weekPadV: Dp) {
     Column(modifier = GlanceModifier.fillMaxWidth()) {
-        Spacer(GlanceModifier.height(MedsDims.weekPadV))
+        Spacer(GlanceModifier.height(weekPadV))
         Box(
             modifier = GlanceModifier
                 .fillMaxWidth()

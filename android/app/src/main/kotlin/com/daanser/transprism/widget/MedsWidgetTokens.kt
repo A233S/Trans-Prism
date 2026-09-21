@@ -9,6 +9,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.glance.LocalSize
 import androidx.glance.unit.ColorProvider
 
 /**
@@ -252,6 +253,72 @@ object MedsDims {
     val hairlineHeight: Dp = 1.dp
     /** 底栏上下留白 */
     val weekPadV: Dp = 5.dp
+
+    /**
+     * 中卡竖向度量 —— **随可用高度自适应**。
+     *
+     * ## 为什么需要两档
+     *
+     * 真机（小米澎湃 OS，2026-09-21）实测反馈：
+     * - **两格高**（约 190dp）观感更紧凑、更好看，但「近 7 天」底栏**底部会被切掉一些**；
+     * - **三格高**（约 285dp）同样的内容却显得**太空**（富余空间全挤在行块上下）。
+     *
+     * 根因：竖向尺寸原先按固定值写死，内容自然高约 230dp ——
+     * 两格高放不下（裁切），三格高又多出一大截（发空）。
+     *
+     * 所以按 [`androidx.glance.LocalSize`] 给的当前高度选档：
+     * 矮了用紧凑档把内容压进可用高度，够高才用常规档。
+     * 两档的竖向差值合计约 25dp，正好覆盖两格高那点缺口。
+     */
+    data class MediumVertical(
+        val padTop: Dp,
+        val padBottom: Dp,
+        val headerGap: Dp,
+        val rowGap: Dp,
+        val rowPadV: Dp,
+        val weekPadV: Dp,
+    )
+
+    /**
+     * 紧凑档 —— 两格高用，把内容压到能完整放下（底栏不再被切）。
+     *
+     * 数值依据真机实测（小米澎湃 OS）：**两格高 152dp / 三格高 221dp**（一格 ≈ 69dp），
+     * 内容自然高约 191dp —— 两格高的缺口约 **40dp**。
+     * 这一档相对常规档合计省 **48dp**，留 ~8dp 余量。
+     */
+    val mediumCompact = MediumVertical(
+        padTop = 8.dp,
+        padBottom = 6.dp,
+        headerGap = 2.dp,
+        rowGap = 2.dp,
+        rowPadV = 1.dp,
+        weekPadV = 2.dp,
+    )
+
+    /** 常规档 —— 三格高及以上用 */
+    val mediumRegular = MediumVertical(
+        padTop = 14.dp,
+        padBottom = 12.dp,
+        headerGap = 8.dp,
+        rowGap = 5.dp,
+        rowPadV = 4.dp,
+        weekPadV = 5.dp,
+    )
+
+    /**
+     * 阈值：低于它就用紧凑档。
+     *
+     * 真机实测两格高 152dp、三格高 221dp —— 取 **200dp** 分界，
+     * 保证「只有用户手动缩到两格高时才切紧凑档」，**三格高的默认观感完全不变**。
+     */
+    const val MEDIUM_COMPACT_MAX_HEIGHT_DP = 200f
+
+    /** 按当前可用高度选竖向档位。必须在 Glance 组合内调用（依赖 `LocalSize`）。 */
+    @Composable
+    fun mediumVertical(): MediumVertical {
+        val h = LocalSize.current.height.value
+        return if (h < MEDIUM_COMPACT_MAX_HEIGHT_DP) mediumCompact else mediumRegular
+    }
 
     /**
      * 时间列固定宽度 + 右对齐。
